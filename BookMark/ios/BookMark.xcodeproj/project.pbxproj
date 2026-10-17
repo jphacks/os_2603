@@ -25,6 +25,7 @@
 		A9022AEC60A5BF8D802CACBF /* FlipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC6A681320E1EF786264876F /* FlipView.swift */; };
 		AB68F3D9FEA53E5ED35337DF /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACBB02A5485DC6B847B4BFD /* ReviewView.swift */; };
 		B4774AC4BCA3B291DD252206 /* BookMarkApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1B991810ED87C84DEA71C4 /* BookMarkApp.swift */; };
+		1800AA89C58CA82215E247C4 /* BooksStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD9BA8BF9FF17AF4094BCB9 /* BooksStyle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +48,7 @@
 		DD5AF576E0B2DEEDCC042523 /* BookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookDetailView.swift; sourceTree = "<group>"; };
 		E53281EEF8D93CAAB33D3A68 /* Matching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Matching.swift; sourceTree = "<group>"; };
 		EACBB02A5485DC6B847B4BFD /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
+		8BD9BA8BF9FF17AF4094BCB9 /* BooksStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BooksStyle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -67,6 +69,7 @@
 				EACBB02A5485DC6B847B4BFD /* ReviewView.swift */,
 				C1C688E701D40E1FA8F4DEDB /* SampleImage.swift */,
 				1A633853A9C53ADA601660AA /* ShelfView.swift */,
+				8BD9BA8BF9FF17AF4094BCB9 /* BooksStyle.swift */,
 				C28F001DB805A132BF7C20A0 /* Store.swift */,
 				10204D203083A338002E5ACF /* ContentView.swift */,
 				10204D223083A34D002E5ACF /* ExportView.swift */,
@@ -165,6 +168,7 @@
 				AB68F3D9FEA53E5ED35337DF /* ReviewView.swift in Sources */,
 				9489605CA35B40F03F16E98E /* SampleImage.swift in Sources */,
 				2C18767306C993604DF02CF7 /* ShelfView.swift in Sources */,
+				1800AA89C58CA82215E247C4 /* BooksStyle.swift in Sources */,
 				10204D1F3083A30E002E5ACF /* MasteredView.swift in Sources */,
 				60B920EB38592CB8198E59F1 /* Store.swift in Sources */,
 			);
