@@ -5,18 +5,18 @@ struct ShelfView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Book.createdAt, order: .reverse) private var books: [Book]
     @State private var showAdd = false
+    @State private var path: [Book] = []
+    @State private var didAutoOpen = false
 
     private let columns = [GridItem(.flexible(), spacing: 14),
                            GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(books) { book in
-                        NavigationLink {
-                            BookDetailView(book: book)
-                        } label: {
+                        NavigationLink(value: book) {
                             BookCard(book: book)
                         }
                         .buttonStyle(.plain)
@@ -40,6 +40,9 @@ struct ShelfView: View {
             }
             .background(Color(red: 0.969, green: 0.957, blue: 0.925))
             .navigationTitle("📖 BookMark")
+            .navigationDestination(for: Book.self) { book in
+                BookDetailView(book: book)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAdd = true } label: {
@@ -50,7 +53,10 @@ struct ShelfView: View {
             .sheet(isPresented: $showAdd) {
                 AddBookSheet()
             }
-            .onAppear(perform: seedIfEmpty)
+            .onAppear {
+                seedIfEmpty()
+                autoOpenLastBook()
+            }
         }
     }
 
@@ -58,6 +64,16 @@ struct ShelfView: View {
         guard books.isEmpty else { return }
         context.insert(Book(title: "オペレーティングシステム 第3版", author: "田中 ほか"))
         context.insert(Book(title: "アルゴリズムとデータ構造 入門", author: "佐藤"))
+    }
+
+    // 起動時、最後に開いた本の撮影画面から始める（本を選ぶ手間をなくす）。
+    private func autoOpenLastBook() {
+        guard !didAutoOpen else { return }
+        didAutoOpen = true
+        if let id = AppStore.lastBookId,
+           let book = books.first(where: { $0.id.uuidString == id }) {
+            path = [book]
+        }
     }
 }
 
