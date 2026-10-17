@@ -20,14 +20,10 @@ struct ReviewView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.969, green: 0.957, blue: 0.925).ignoresSafeArea()
+            BooksStyle.background.ignoresSafeArea()
             VStack {
                 HStack {
-                    Button("閉じる") { onClose() }
-                        .font(.subheadline).bold()
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(Color.black).foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    BooksCloseButton { onClose() }
                     Spacer()
                     if !deck.isEmpty {
                         Text("\(min(index + 1, deck.count)) / \(deck.count)")
@@ -74,7 +70,7 @@ struct ReviewView: View {
                 Button("もう一度") {
                     deck = stickies.shuffled(); index = 0; showAnswer = false
                 }
-                .buttonStyle(.borderedProminent).tint(.black)
+                .buttonStyle(CaptureButton()).frame(width: 160)
             }
         } else {
             ReviewCard(
@@ -116,7 +112,7 @@ struct ReviewView: View {
             .font(.subheadline)
             .padding(.horizontal, 18).padding(.vertical, 14)
             .background(.black.opacity(0.88))
-            .foregroundStyle(Color(red: 0.969, green: 0.957, blue: 0.925))
+            .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 16).padding(.bottom, 20)
             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -138,7 +134,7 @@ private struct ReviewCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("p.\(sticky.pageNumber) · \(questionText)")
-                .font(.footnote).bold().foregroundStyle(.secondary)
+                .font(.headline).foregroundStyle(BooksStyle.ink)
 
             contextView
 
@@ -152,30 +148,31 @@ private struct ReviewCard: View {
 
             HStack(spacing: 10) {
                 if showAnswer {
-                    Button("次へ") { onNext() }
-                        .buttonStyle(.borderedProminent).tint(.black)
+                    Button { onNext() } label: { Text("次へ").frame(maxWidth: .infinity) }
+                        .buttonStyle(CaptureButton())
                     Button {
                         onPeelTapped()
                     } label: {
-                        Label("覚えた・剥がす", systemImage: "hand.draw")
+                        Label("覚えた・剥がす", systemImage: "hand.draw").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered).tint(sticky.color.color)
+                    .buttonStyle(CaptureButton(ghost: true))
                 } else {
-                    Button(loadingQuestion ? "問題生成中…" : "答えを見る") {
+                    Button {
                         showAnswer = true
+                    } label: {
+                        Text(loadingQuestion ? "問題生成中…" : "答えを見る").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).tint(.black)
+                    .buttonStyle(CaptureButton())
                     .disabled(loadingQuestion)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 6)
         }
-        .padding(20)
+        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 1, green: 0.992, blue: 0.973))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.black.opacity(0.08)))
+        .background(BooksStyle.card)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
         .padding(.horizontal, 16)
         .task(id: sticky.id) { await loadQuestion() }
     }
@@ -195,7 +192,7 @@ private struct ReviewCard: View {
                 Text(after).foregroundStyle(.primary)
             }
         }
-        .font(.body).lineSpacing(4)
+        .font(BooksStyle.serif(.body)).lineSpacing(6)
     }
 
     private func loadQuestion() async {

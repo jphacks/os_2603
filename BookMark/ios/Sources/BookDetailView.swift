@@ -44,7 +44,7 @@ struct BookDetailView: View {
                 captureAndList
             }
         }
-        .background(Color(red: 0.969, green: 0.957, blue: 0.925))
+        .background(BooksStyle.background)
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
@@ -144,7 +144,23 @@ struct BookDetailView: View {
 
     private var captureAndList: some View {
         ScrollView {
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
+                // 表紙・書名・著者（Apple Books の本の詳細のように中央に大きく）
+                VStack(spacing: 10) {
+                    BookCoverView(book: book, titleFont: .system(size: 17, weight: .heavy))
+                        .frame(width: 150)
+                        .shadow(color: .black.opacity(0.15), radius: 10, y: 6)
+                    Text(book.title)
+                        .font(.title2.bold())
+                        .foregroundStyle(BooksStyle.ink)
+                        .multilineTextAlignment(.center)
+                    if let author = book.author, !author.isEmpty {
+                        Text(author).font(.subheadline).foregroundStyle(BooksStyle.subInk)
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+
                 // 撮影ボタン群
                 HStack(spacing: 10) {
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -158,30 +174,31 @@ struct BookDetailView: View {
                         Label("写真を選ぶ", systemImage: "photo")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(CaptureButton())
+                    .buttonStyle(CaptureButton(ghost: UIImagePickerController.isSourceTypeAvailable(.camera)))
                 }
 
                 Button { setPhoto(Sample.render(Sample.pages[0])) } label: {
                     Label("サンプル画像で試す", systemImage: "wand.and.stars")
-                        .frame(maxWidth: .infinity)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(BooksStyle.accent)
                 }
-                .buttonStyle(CaptureButton(ghost: true))
 
                 Text("撮ったら、付箋を貼りたい部分を指でなぞって囲むだけ")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(BooksStyle.subInk)
+
+                Divider().padding(.vertical, 6)
 
                 // 付箋数・覚えた数
                 if totalPlaced > 0 {
                     HStack {
                         Text("付箋 \(totalPlaced) 枚中 \(masteredCount) 枚を覚えた")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(BooksStyle.subInk)
                         Spacer()
                         if masteredCount > 0 {
                             Button("覚えた付箋を見る") { showMastered = true }
-                                .font(.caption).foregroundStyle(.blue)
+                                .font(.caption.weight(.semibold)).foregroundStyle(BooksStyle.accent)
                         }
                     }
-                    .padding(.horizontal, 4)
                 }
 
                 // パラパラ・復習
@@ -193,16 +210,15 @@ struct BookDetailView: View {
                         Label("復習", systemImage: "brain.head.profile").frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(.bordered).tint(.secondary)
+                .buttonStyle(CaptureButton(ghost: true))
                 .disabled(placed.isEmpty)
-                .padding(.top, 2)
 
                 // 書き出しボタン
                 ExportButton(book: book)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BooksStyle.accent)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .disabled(placed.isEmpty)
-                    .padding(.top, 2)
 
                 // 付箋一覧（剥がし対応）
                 if placed.isEmpty {
@@ -210,7 +226,7 @@ struct BookDetailView: View {
                         "まだ付箋がありません",
                         systemImage: "tag",
                         description: Text("撮って、貼りたい部分を囲んでみましょう"))
-                        .padding(.top, 30)
+                        .padding(.top, 20)
                 } else {
                     ForEach(placed) { s in
                         StickyRow(sticky: s)
@@ -219,7 +235,8 @@ struct BookDetailView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
     }
 
@@ -302,7 +319,7 @@ struct PhotoReaderView: View {
 
             if let message {
                 Text(message).font(.caption)
-                    .foregroundStyle(Color(red: 0.75, green: 0.26, blue: 0.17))
+                    .foregroundStyle(.red)
             }
             Spacer(minLength: 0)
         }
@@ -332,7 +349,7 @@ struct PhotoReaderView: View {
         HStack {
             HStack(spacing: 6) {
                 Image(systemName: "number")
-                Text("ページ")
+                Text("ページ").fixedSize()
                 TextField("例)12", text: $pageText)
                     .frame(width: 56)
                     .textFieldStyle(.roundedBorder)
@@ -370,7 +387,10 @@ struct PhotoReaderView: View {
                 }
                 .buttonStyle(.bordered).tint(.secondary)
             }
-            Button("閉じる") { onClose() }.buttonStyle(.bordered)
+            Button("閉じる") { onClose() }
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.borderedProminent).tint(BooksStyle.ink)
+                .clipShape(Capsule())
         }
         .padding(.horizontal, 16).padding(.top, 12)
     }
@@ -381,6 +401,7 @@ struct PhotoReaderView: View {
     private func imageCanvas(w: CGFloat, h: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             Image(uiImage: image).resizable().frame(width: w, height: h)
+                .overlay(Rectangle().stroke(Color.black.opacity(0.08)))
 
             // OCR 行ハイライト（Canvas で一括描画 → ForEach より高速）
             if wholeLoaded {
@@ -423,8 +444,8 @@ struct PhotoReaderView: View {
                 let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                                   width: abs(end.x - start.x), height: abs(end.y - start.y))
                 Rectangle()
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                    .background(Color.accentColor.opacity(0.1))
+                    .strokeBorder(BooksStyle.accent, lineWidth: 2)
+                    .background(BooksStyle.accent.opacity(0.1))
                     .frame(width: rect.width, height: rect.height)
                     .position(x: rect.midX, y: rect.midY)
                     .allowsHitTesting(false)
@@ -648,28 +669,32 @@ struct PhotoReaderView: View {
 struct StickyRow: View {
     let sticky: Sticky
     var body: some View {
-        HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 4).fill(sticky.color.color).frame(width: 6)
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 2).fill(sticky.color.color).frame(width: 5)
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(sticky.heading).font(.headline).lineLimit(1)
-                    Text("p.\(sticky.pageNumber)")
-                        .font(.caption2).bold().foregroundStyle(.secondary)
+                    Text(sticky.heading).font(.headline).foregroundStyle(BooksStyle.ink).lineLimit(1)
+                    Spacer()
                     Text(String(repeating: "★", count: sticky.importance))
-                        .font(.caption2).foregroundStyle(Color(red: 0.75, green: 0.26, blue: 0.17))
+                        .font(.caption2).foregroundStyle(BooksStyle.ink)
+                    Text("p.\(sticky.pageNumber)")
+                        .font(.caption).foregroundStyle(BooksStyle.subInk)
                 }
-                Text(sticky.marker).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(sticky.marker)
+                    .font(BooksStyle.serif(.subheadline))
+                    .foregroundStyle(BooksStyle.ink)
+                    .padding(.horizontal, 2)
+                    .background(sticky.color.color.opacity(0.35))
+                    .lineLimit(2)
                 if !sticky.memo.isEmpty {
-                    Text("📝 \(sticky.memo)").font(.caption)
+                    Text("📝 \(sticky.memo)").font(.caption).foregroundStyle(BooksStyle.subInk)
                 }
             }
-            Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 1.0, green: 0.992, blue: 0.973))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.08)))
+        .background(BooksStyle.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -738,19 +763,26 @@ struct StickyEditor: View {
 
 // MARK: - 部品
 
+// 黒いカプセルのボタン（ghost は薄いグレー）
 struct CaptureButton: ButtonStyle {
     var ghost = false
     func makeBody(configuration: Configuration) -> some View {
+        CaptureButtonBody(configuration: configuration, ghost: ghost)
+    }
+}
+
+private struct CaptureButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let ghost: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
         configuration.label
             .font(.subheadline).bold()
             .padding(.vertical, 14)
-            .foregroundStyle(ghost ? Color.secondary : .white)
-            .background(ghost ? Color(red: 1.0, green: 0.992, blue: 0.973)
-                              : Color(red: 0.75, green: 0.26, blue: 0.17))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.black.opacity(ghost ? 0.12 : 0)))
-            .opacity(configuration.isPressed ? 0.85 : 1)
+            .foregroundStyle(ghost ? BooksStyle.ink : .white)
+            .background(ghost ? BooksStyle.card : BooksStyle.ink, in: Capsule())
+            .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.8 : 1)
     }
 }
 

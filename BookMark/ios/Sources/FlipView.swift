@@ -18,19 +18,14 @@ struct FlipView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.11, green: 0.102, blue: 0.086).ignoresSafeArea()
+            BooksStyle.background.ignoresSafeArea()
             VStack(spacing: 0) {
                 HStack {
-                    Button("閉じる") { onClose() }
-                        .font(.subheadline).bold()
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(.white.opacity(0.15))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    BooksCloseButton { onClose() }
                     Spacer()
                     if !stickies.isEmpty {
                         Text("\(index + 1) / \(stickies.count) · \(bookTitle)")
-                            .font(.footnote).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                            .font(.footnote).foregroundStyle(BooksStyle.subInk).lineLimit(1)
                     }
                 }
                 .padding(.horizontal, 18).padding(.top, 12)
@@ -39,7 +34,7 @@ struct FlipView: View {
                     Spacer()
                     VStack(spacing: 10) {
                         Text("🪶").font(.system(size: 40))
-                        Text("まだ付箋がありません").foregroundStyle(.white.opacity(0.7))
+                        Text("まだ付箋がありません").foregroundStyle(BooksStyle.subInk)
                     }
                     Spacer()
                 } else {
@@ -50,6 +45,7 @@ struct FlipView: View {
                     }
                     .tabViewStyle(.page(indexDisplayMode: .always))
                     .indexViewStyle(.page(backgroundDisplayMode: .always))
+                    .padding(.bottom, 8)
                 }
             }
             .overlay(alignment: .bottom) { undoToast }
@@ -113,37 +109,36 @@ private struct FlipCard: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 18) {
                 Text("p.\(sticky.pageNumber)")
-                    .font(.subheadline).bold().foregroundStyle(.white.opacity(0.6))
+                    .font(.subheadline).bold().foregroundStyle(BooksStyle.subInk)
 
-                VStack(alignment: .leading, spacing: 6) {
+                // 本のページのように、周りの文と付箋の行を明朝体で組む
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(sticky.clipBefore, id: \.self) {
-                        Text($0).foregroundStyle(.white.opacity(0.75))
+                        Text($0).foregroundStyle(BooksStyle.subInk)
                     }
-                    Text(sticky.marker).bold().foregroundStyle(.white)
-                        .padding(.bottom, 3)
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(sticky.color.color).frame(height: 3)
-                        }
+                    Text(sticky.marker).foregroundStyle(BooksStyle.ink)
+                        .padding(.horizontal, 2)
+                        .background(sticky.color.color.opacity(0.4))
                     ForEach(sticky.clipAfter, id: \.self) {
-                        Text($0).foregroundStyle(.white.opacity(0.75))
+                        Text($0).foregroundStyle(BooksStyle.subInk)
                     }
                 }
-                .font(.body).lineSpacing(6)
+                .font(BooksStyle.serif(.title3)).lineSpacing(8)
 
                 HStack(spacing: 10) {
-                    Circle().fill(sticky.color.color).frame(width: 14, height: 14)
-                    Text(sticky.heading).font(.title3).bold().foregroundStyle(.white)
+                    Circle().fill(sticky.color.color).frame(width: 12, height: 12)
+                    Text(sticky.heading).font(.title3).bold().foregroundStyle(BooksStyle.ink)
                 }
-                .padding(.top, 8)
+                .padding(.top, 6)
 
                 if !sticky.memo.isEmpty {
                     Text(sticky.memo)
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .foregroundStyle(BooksStyle.ink)
+                        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(BooksStyle.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
 
                 Button {
@@ -151,16 +146,15 @@ private struct FlipCard: View {
                 } label: {
                     Label("覚えた・剥がす", systemImage: "hand.draw")
                         .font(.subheadline).bold()
-                        .frame(maxWidth: .infinity).padding(.vertical, 12)
-                        .background(sticky.color.color.opacity(0.25))
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .background(BooksStyle.ink)
                         .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12)
-                            .stroke(sticky.color.color.opacity(0.6), lineWidth: 1))
+                        .clipShape(Capsule())
                 }
                 .padding(.top, 4)
             }
-            .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28).padding(.vertical, 24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .peelable { onPeelTapped() }
     }
