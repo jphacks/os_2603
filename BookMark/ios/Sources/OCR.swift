@@ -51,9 +51,8 @@ enum OCR {
                         let lines = (request.results ?? []).compactMap { observation -> OCRLine? in
                             guard let text = observation.topCandidates(1).first?.string else { return nil }
                             let box = observation.boundingBox
-                            return OCRLine(text: text, rect: CGRect(
-                                x: box.minX, y: 1 - box.maxY,
-                                width: box.width, height: box.height))
+                            return OCRLine(text: text, rect: OCRGeometry.imageRect(
+                                from: box, regionOfInterest: request.regionOfInterest))
                         }.sorted { $0.rect.minY < $1.rect.minY }
                         continuation.resume(returning: OCRResult(
                             lines: lines, pageNumber: detectPageNumber(lines)))
@@ -132,5 +131,16 @@ struct OCRSelection {
             marker: selected.map { $0.text }.joined(),
             before: Array(nearby.filter { $0.rect.midY < rect.minY }.suffix(2).map { $0.text }),
             after: Array(nearby.filter { $0.rect.midY > rect.maxY }.prefix(2).map { $0.text }))
+    }
+}
+
+// Vision の ROI 内・左下原点の座標を、元画像全体・左上原点へ変換する。
+// 全体OCRでは ROI=(0,0,1,1) なので従来の上下反転と同じ結果になる。
+enum OCRGeometry {
+    static func imageRect(from box: CGRect, regionOfInterest roi: CGRect) -> CGRect {
+        CGRect(x: roi.minX + box.minX * roi.width,
+               y: 1 - (roi.minY + box.maxY * roi.height),
+               width: box.width * roi.width,
+               height: box.height * roi.height)
     }
 }
