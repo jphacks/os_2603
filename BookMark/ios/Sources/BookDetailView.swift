@@ -19,9 +19,6 @@ struct BookDetailView: View {
     @State private var showReview = false
     @State private var showMastered = false
 
-    // 剥がしフロー
-    @State private var peelQuizSticky: Sticky?
-    @State private var trashSticky: Sticky?
     @State private var undoSticky: Sticky?
     @State private var showUndo = false
 
@@ -51,29 +48,6 @@ struct BookDetailView: View {
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
-        .sheet(item: $peelQuizSticky) { sticky in
-            PeelQuizView(
-                sticky: sticky,
-                onMastered: {
-                    peelQuizSticky = nil
-                    trashSticky = sticky
-                },
-                onReturn: {
-                    peelQuizSticky = nil
-                }
-            )
-            .presentationDetents([.large])
-        }
-        .fullScreenCover(item: $trashSticky) { sticky in
-            TrashGameView(
-                sticky: sticky,
-                onSuccess: { markMastered(sticky) },
-                onDismiss: {
-                    trashSticky = nil
-                    markMastered(sticky)  // スキップしても覚えた扱い
-                }
-            )
-        }
         .sheet(isPresented: $showMastered) {
             MasteredView(book: book)
         }
@@ -116,16 +90,9 @@ struct BookDetailView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showCamera = true }
     }
 
-    // MARK: - 剥がし処理
-
-    private func handlePeel(_ sticky: Sticky) {
-        peelQuizSticky = sticky
-    }
-
     private func markMastered(_ sticky: Sticky) {
         sticky.mastered = true
         sticky.masteredAt = .now
-        trashSticky = nil
         undoSticky = sticky
         withAnimation { showUndo = true }
         Task {
@@ -139,7 +106,7 @@ struct BookDetailView: View {
     @ViewBuilder private var undoToast: some View {
         if showUndo, let s = undoSticky {
             HStack(spacing: 12) {
-                Text("付箋を剥がしました")
+                Text("覚えました")
                     .font(.subheadline)
                 Spacer()
                 Button("元に戻す") {
@@ -234,7 +201,7 @@ struct BookDetailView: View {
                 } else {
                     ForEach(placed) { s in
                         StickyRow(sticky: s)
-                            .peelable { handlePeel(s) }
+                            .peelable { markMastered(s) }
                             .onTapGesture { editing = s }
                     }
                 }

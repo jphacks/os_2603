@@ -1,20 +1,15 @@
 import SwiftUI
 
-// 復習モード: AI 問題 or 簡易カード。答え確認後にその場で剥がせる。
-// 剥がし→クイズ→ゴミ箱ゲームを ReviewView 内で完結させる。
+// 復習モード: AI 問題 or 簡易カード。答え確認後にその場で覚えた登録ができる。
 
 struct ReviewView: View {
     let stickies: [Sticky]
-    var onMastered: (Sticky) -> Void   // 覚えたが確定したとき
+    var onMastered: (Sticky) -> Void
     var onClose: () -> Void
 
     @State private var deck: [Sticky] = []
     @State private var index = 0
     @State private var showAnswer = false
-
-    // 剥がしフロー
-    @State private var peelQuizSticky: Sticky?
-    @State private var trashSticky: Sticky?
     @State private var undoTarget: Sticky?
     @State private var showUndo = false
 
@@ -39,21 +34,6 @@ struct ReviewView: View {
             .overlay(alignment: .bottom) { undoToast }
         }
         .onAppear { if deck.isEmpty { deck = stickies.shuffled() } }
-        .sheet(item: $peelQuizSticky) { sticky in
-            PeelQuizView(
-                sticky: sticky,
-                onMastered: { peelQuizSticky = nil; trashSticky = sticky },
-                onReturn:   { peelQuizSticky = nil }
-            )
-            .presentationDetents([.large])
-        }
-        .fullScreenCover(item: $trashSticky) { sticky in
-            TrashGameView(
-                sticky: sticky,
-                onSuccess: { markMastered(sticky) },
-                onDismiss: { trashSticky = nil; markMastered(sticky) }
-            )
-        }
         .animation(.spring(), value: showUndo)
     }
 
@@ -77,13 +57,12 @@ struct ReviewView: View {
                 sticky: deck[index],
                 showAnswer: $showAnswer,
                 onNext: { showAnswer = false; index += 1 },
-                onPeelTapped: { peelQuizSticky = deck[index] }
+                onMastered: { markMastered(deck[index]) }
             )
         }
     }
 
     private func markMastered(_ sticky: Sticky) {
-        trashSticky = nil
         sticky.mastered = true
         sticky.masteredAt = .now
         onMastered(sticky)
@@ -101,7 +80,7 @@ struct ReviewView: View {
     @ViewBuilder private var undoToast: some View {
         if showUndo, let s = undoTarget {
             HStack(spacing: 12) {
-                Text("付箋を剥がしました")
+                Text("覚えました")
                 Spacer()
                 Button("元に戻す") {
                     s.mastered = false; s.masteredAt = nil
@@ -126,7 +105,7 @@ private struct ReviewCard: View {
     let sticky: Sticky
     @Binding var showAnswer: Bool
     var onNext: () -> Void
-    var onPeelTapped: () -> Void
+    var onMastered: () -> Void
     @Environment(VaultManager.self) private var vault
 
     @State private var aiQuestion: String?
@@ -157,9 +136,9 @@ private struct ReviewCard: View {
                     Button { onNext() } label: { Text("次へ").frame(maxWidth: .infinity) }
                         .buttonStyle(CaptureButton())
                     Button {
-                        onPeelTapped()
+                        onMastered()
                     } label: {
-                        Label("覚えた・剥がす", systemImage: "hand.draw").frame(maxWidth: .infinity)
+                        Label("覚えた", systemImage: "checkmark").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(CaptureButton(ghost: true))
                 } else {

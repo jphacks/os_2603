@@ -1,18 +1,14 @@
 import SwiftUI
 
-// パラパラモード: 付箋ページを順にめくる。剥がし完結（クイズ→ゴミ箱）を内部で処理する。
+// パラパラモード: 付箋ページを順にめくる。
 
 struct FlipView: View {
     let stickies: [Sticky]
     let bookTitle: String
-    var onMastered: (Sticky) -> Void   // 覚えたが確定したとき（親が mastered フラグを立てる）
+    var onMastered: (Sticky) -> Void
     var onClose: () -> Void
 
     @State private var index = 0
-
-    // 剥がしフロー（fullScreenCover 内で完結させる）
-    @State private var peelQuizSticky: Sticky?
-    @State private var trashSticky: Sticky?
     @State private var undoTarget: Sticky?
     @State private var showUndo = false
 
@@ -40,7 +36,7 @@ struct FlipView: View {
                 } else {
                     TabView(selection: $index) {
                         ForEach(Array(stickies.enumerated()), id: \.element.id) { i, s in
-                            FlipCard(sticky: s, onPeelTapped: { peelQuizSticky = s }).tag(i)
+                            FlipCard(sticky: s, onMastered: { markMastered(s) }).tag(i)
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .always))
@@ -50,26 +46,10 @@ struct FlipView: View {
             }
             .overlay(alignment: .bottom) { undoToast }
         }
-        .sheet(item: $peelQuizSticky) { sticky in
-            PeelQuizView(
-                sticky: sticky,
-                onMastered: { peelQuizSticky = nil; trashSticky = sticky },
-                onReturn:   { peelQuizSticky = nil }
-            )
-            .presentationDetents([.large])
-        }
-        .fullScreenCover(item: $trashSticky) { sticky in
-            TrashGameView(
-                sticky: sticky,
-                onSuccess: { markMastered(sticky) },
-                onDismiss: { trashSticky = nil; markMastered(sticky) }
-            )
-        }
         .animation(.spring(), value: showUndo)
     }
 
     private func markMastered(_ sticky: Sticky) {
-        trashSticky = nil
         sticky.mastered = true
         sticky.masteredAt = .now
         onMastered(sticky)
@@ -84,7 +64,7 @@ struct FlipView: View {
     @ViewBuilder private var undoToast: some View {
         if showUndo, let s = undoTarget {
             HStack(spacing: 12) {
-                Text("付箋を剥がしました")
+                Text("覚えました")
                 Spacer()
                 Button("元に戻す") {
                     s.mastered = false; s.masteredAt = nil
@@ -105,7 +85,7 @@ struct FlipView: View {
 
 private struct FlipCard: View {
     let sticky: Sticky
-    var onPeelTapped: () -> Void
+    var onMastered: () -> Void
     @Environment(VaultManager.self) private var vault
 
     private var displayMemo: String {
@@ -148,9 +128,9 @@ private struct FlipCard: View {
                 }
 
                 Button {
-                    onPeelTapped()
+                    onMastered()
                 } label: {
-                    Label("覚えた・剥がす", systemImage: "hand.draw")
+                    Label("覚えた", systemImage: "checkmark")
                         .font(.subheadline).bold()
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                         .background(BooksStyle.ink)
@@ -162,6 +142,5 @@ private struct FlipCard: View {
             .padding(.horizontal, 28).padding(.vertical, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .peelable { onPeelTapped() }
     }
 }
