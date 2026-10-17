@@ -309,6 +309,7 @@ struct PhotoReaderView: View {
     @State private var recognitionTask: Task<Void, Never>?
     @State private var recognitionID: UUID?
     @State private var message: String?
+    @State private var didAutoDetectPage = false
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     private var activeStickies: [Sticky] {
@@ -365,6 +366,7 @@ struct PhotoReaderView: View {
             if let pn = pageNumber { pageText = String(pn) }
             haptic.prepare()
             if book.stickies.contains(where: { $0.placed && !$0.mastered }) { loadWholePage() }
+            autoDetectPage()
         }
         .onDisappear {
             cancelSelection()
@@ -652,6 +654,38 @@ struct PhotoReaderView: View {
             matchingTask = nil
             let unmatched = markers.count - pins.count
             message = unmatched > 0 ? "位置を特定できない付箋が\(unmatched)枚あります。ページ番号を確認するか、付箋一覧から開けます" : nil
+        }
+    }
+
+    // 写真の上下の余白だけを読み、ページ番号を自動で入力する。
+    // ページ全体は読まない（プライバシー・速度）。検出できなければ前回値のまま。
+    private func autoDetectPage() {
+        guard !didAutoDetectPage else { return }
+        didAutoDetectPage = true
+        let initial = pageText
+        Task {
+            // 下の余白（ノンブルが多い）→ 上の余白 の順に探す。
+            let strips = [CGRect(x: 0, y: 0.82, width: 1, height: 0.18),
+                          CGRect(x: 0, y: 0, width: 1, height: 0.18)]
+            for roi in strips {
+                if Task.isCancelled { return }
+                let result = await OCR.recognize(image, regionOfInterest: roi)
+                guard let pn = result.pageNumber else { continue }
+                await MainActor.run {
+                    // ユーザーが手入力/範囲選択を始めていなければ自動反映。
+                    guard pageText == initial, selectedRect == nil else { return }
+                    pageText = String(pn)
+                    pageNumber = pn
+                    AppStore.setLastPage(pn, for: book.id)
+                    let note = "ページ \(pn) を自動入力しました"
+                    message = note
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_800_000_000)
+                        await MainActor.run { if message == note { message = nil } }
+                    }
+                }
+                return
+            }
         }
     }
 
