@@ -1,23 +1,42 @@
 import SwiftUI
 import SwiftData
 
-// 付箋の色（A13/A17: 重要度・色の意味づけ）。
+// 付箋の色＝カテゴリ（A13/A17: 色の意味づけ）。カテゴリ名は設定で変えられる。
 enum StickyColor: String, CaseIterable, Codable {
     case yellow, pink, blue, green, purple
 
     var color: Color {
         switch self {
-        case .yellow: return Color(red: 1.0, green: 0.878, blue: 0.4)
-        case .pink: return Color(red: 1.0, green: 0.62, blue: 0.71)
-        case .blue: return Color(red: 0.557, green: 0.776, blue: 1.0)
-        case .green: return Color(red: 0.655, green: 0.89, blue: 0.627)
-        case .purple: return Color(red: 0.78, green: 0.659, blue: 1.0)
+        case .yellow: return Color(red: 0.949, green: 0.773, blue: 0.361)
+        case .pink: return Color(red: 0.941, green: 0.565, blue: 0.478)
+        case .blue: return Color(red: 0.498, green: 0.659, blue: 0.863)
+        case .green: return Color(red: 0.549, green: 0.780, blue: 0.604)
+        case .purple: return Color(red: 0.702, green: 0.616, blue: 0.859)
         }
     }
 
-    static func cycle(_ index: Int) -> StickyColor {
-        allCases[index % allCases.count]
+    /// 文字に使う少し濃い色
+    var ink: Color {
+        switch self {
+        case .yellow: return Color(red: 0.78, green: 0.56, blue: 0.13)
+        case .pink: return Color(red: 0.86, green: 0.42, blue: 0.33)
+        case .blue: return Color(red: 0.33, green: 0.50, blue: 0.74)
+        case .green: return Color(red: 0.33, green: 0.60, blue: 0.40)
+        case .purple: return Color(red: 0.52, green: 0.42, blue: 0.72)
+        }
     }
+
+    var defaultCategory: String {
+        switch self {
+        case .yellow: return "大事"
+        case .pink: return "疑問"
+        case .blue: return "定義"
+        case .green: return "具体例"
+        case .purple: return "あとで調べる"
+        }
+    }
+
+    var categoryKey: String { "category.\(rawValue)" }
 }
 
 @Model
@@ -26,6 +45,11 @@ final class Book {
     var title: String
     var author: String?
     var isbn: String?
+    var publisher: String?
+    var publishedDate: String?
+    var summary: String?
+    var pageCount: Int?
+    @Attribute(.externalStorage) var coverData: Data?
     var createdAt: Date
     @Relationship(deleteRule: .cascade, inverse: \Sticky.book)
     var stickies: [Sticky]
@@ -37,6 +61,22 @@ final class Book {
         self.isbn = isbn
         self.createdAt = .now
         self.stickies = []
+    }
+
+    /// 本に貼ってある付箋（ページ順）
+    var placedStickies: [Sticky] {
+        stickies.filter { $0.placed }
+            .sorted { ($0.pageNumber, $0.order) < ($1.pageNumber, $1.order) }
+    }
+
+    func apply(_ info: BookInfo, cover: Data?) {
+        title = info.title
+        author = info.author ?? author
+        publisher = info.publisher ?? publisher
+        publishedDate = info.publishedDate ?? publishedDate
+        summary = info.summary ?? summary
+        pageCount = info.pageCount ?? pageCount
+        if let cover { coverData = cover }
     }
 }
 
@@ -52,7 +92,6 @@ final class Sticky {
     var memo: String
     var heading: String       // 一言見出し（本番はAI、今は簡易生成）
     var colorRaw: String
-    var importance: Int       // 1..3
     var order: Double
     var createdAt: Date
     var book: Book?
@@ -69,7 +108,6 @@ final class Sticky {
         self.memo = ""
         self.heading = Sticky.makeHeading(memo: "", marker: marker)
         self.colorRaw = color.rawValue
-        self.importance = 2
         self.order = Date().timeIntervalSince1970
         self.createdAt = .now
         self.book = book

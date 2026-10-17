@@ -24,9 +24,38 @@ struct BookMarkApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ShelfView()
-                .background(Color(red: 0.969, green: 0.957, blue: 0.925))
+            RootTabView()
         }
         .modelContainer(container)
+    }
+}
+
+/// 下のタブ：ホーム（撮る）／本（まとめ）／設定
+struct RootTabView: View {
+    @Environment(\.modelContext) private var context
+    @Query private var books: [Book]
+    @State private var appState = AppState()
+
+    var body: some View {
+        TabView(selection: $appState.tab) {
+            HomeView()
+                .tabItem { Label("ホーム", systemImage: "camera") }
+                .tag(AppState.Tab.home)
+            ShelfView()
+                .tabItem { Label("本", systemImage: "books.vertical") }
+                .tag(AppState.Tab.books)
+            SettingsView()
+                .tabItem { Label("設定", systemImage: "gearshape") }
+                .tag(AppState.Tab.settings)
+        }
+        .tint(Theme.accent)
+        .environment(appState)
+        .onAppear(perform: seedIfEmpty)
+    }
+
+    private func seedIfEmpty() {
+        guard books.isEmpty else { return }
+        context.insert(Book(title: "オペレーティングシステム 第3版", author: "田中 ほか"))
+        context.insert(Book(title: "アルゴリズムとデータ構造 入門", author: "佐藤"))
     }
 }
