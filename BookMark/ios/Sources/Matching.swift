@@ -51,3 +51,36 @@ func findBestLine(marker: String, lines: [String], threshold: Double = 0.5) -> I
     if best == -1 || bestScore < threshold { return nil }
     return best
 }
+
+// OCR の改行位置が変わっても、連続行を連結して元の引用と照合する。
+// UI の描画から呼ばず、OCR 完了時にバックグラウンドで実行する。
+func findBestPassage(marker: String, lines: [String], threshold: Double = 0.65) -> Range<Int>? {
+    let target = normalizeText(marker)
+    guard !target.isEmpty else { return nil }
+    let normalized = lines.map(normalizeText)
+    var best: Range<Int>?
+    var bestScore = threshold
+    for start in normalized.indices {
+        if Task.isCancelled { return nil }
+        var candidate = ""
+        for end in start..<normalized.count {
+            candidate += normalized[end]
+            guard !candidate.isEmpty else { continue }
+            // 部分的に囲んだ文字も、再撮影時には一行の一部として認識される。
+            let score: Double
+            if candidate == target { return start..<(end + 1) }
+            if target.count >= 6 && candidate.contains(target) {
+                score = 0.98 + 0.01 * Double(target.count) / Double(candidate.count)
+            } else {
+                let lengthRatio = Double(min(candidate.count, target.count)) / Double(max(candidate.count, target.count))
+                score = lengthRatio >= bestScore ? similarity(target, candidate) : 0
+            }
+            if score > bestScore {
+                bestScore = score
+                best = start..<(end + 1)
+            }
+            if candidate.count > target.count * 2 { break }
+        }
+    }
+    return best
+}

@@ -81,6 +81,7 @@ enum OCR {
             return top + bottom
         }
         let best = candidates.max { score($0) < score($1) }!
+        guard score(best) > 0 else { return nil }
         return Int(best.text.trimmingCharacters(in: .whitespaces))
     }
 

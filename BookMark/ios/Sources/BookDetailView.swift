@@ -262,6 +262,15 @@ struct PhotoReaderView: View {
     @State private var selectedRect: CGRect?
     @State private var draft: OCRSelection?
     @State private var draftPage: Int?
+    @State private var manualZoom: CGFloat = 1
+    @GestureState private var magnification: CGFloat = 1
+    @State private var manualOffset: CGSize = .zero
+    @State private var moveMode = false
+    @State private var panStart: CGSize?
+    @State private var pinching = false
+    @State private var matchingTask: Task<Void, Never>?
+    @State private var matchingID: UUID?
+    @State private var restoring = false
     @State private var busy = false
     @State private var recognitionTask: Task<Void, Never>?
     @State private var recognitionID: UUID?
@@ -275,6 +284,7 @@ struct PhotoReaderView: View {
     var body: some View {
         VStack(spacing: 12) {
             header
+            zoomControls
             GeometryReader { geo in
                 let ratio = image.size.width / max(image.size.height, 1)
                 let w = min(geo.size.width, geo.size.height * ratio)
@@ -290,9 +300,20 @@ struct PhotoReaderView: View {
             if selectedRect != nil {
                 selectionControls
             } else {
-                Text(busy ? "ページを読み取り中…" : "囲んで拡大 → 確認して付箋を追加。ピンをタップするとメモが開きます")
+                Text(busy ? "ページを読み取り中…" : "ピンチで拡大。「移動」で位置を合わせ、「範囲選択」で囲みます。ピンをタップするとメモが開きます")
                     .font(.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 20)
+            }
+            if selectedRect == nil && !activeStickies.isEmpty {
+                HStack {
+                    Text(restoring ? "付箋の位置を復元中…" : "このページの付箋 \(activeStickies.count)枚")
+                    Spacer()
+                    Menu("付箋一覧") {
+                        ForEach(activeStickies) { sticky in
+                            Button(sticky.heading) { onEdit(sticky) }
+                        }
+                    }
+                }.font(.caption).padding(.horizontal, 20)
             }
             if let message {
                 Text(message).font(.caption).foregroundStyle(.secondary)
@@ -309,9 +330,14 @@ struct PhotoReaderView: View {
         .onAppear {
             if let pn = pageNumber { pageText = String(pn) }
             haptic.prepare()
-            if !activeStickies.isEmpty { loadWholePage() }
+            if book.stickies.contains(where: { $0.placed && !$0.mastered }) { loadWholePage() }
         }
-        .onDisappear { cancelSelection() }
+        .onDisappear {
+            cancelSelection()
+            matchingTask?.cancel()
+            matchingID = nil
+            restoring = false
+        }
         .onChange(of: pageNumber) { _, _ in
             cancelSelection()
             updateCachedPins()
@@ -339,6 +365,30 @@ struct PhotoReaderView: View {
             Button("閉じる") { onClose() }.buttonStyle(.bordered)
         }
         .padding(.horizontal, 16).padding(.top, 12)
+    }
+
+    private var zoomControls: some View {
+        HStack(spacing: 12) {
+            Button { manualZoom = max(1, manualZoom - 0.5) } label: {
+                Image(systemName: "minus.magnifyingglass")
+            }
+            Text("\(manualZoom, specifier: "%.1f")×").font(.caption.monospacedDigit())
+            Button { manualZoom = min(8, manualZoom + 0.5) } label: {
+                Image(systemName: "plus.magnifyingglass")
+            }
+            Picker("操作", selection: $moveMode) {
+                Text("範囲選択").tag(false)
+                Text("移動").tag(true)
+            }.pickerStyle(.segmented)
+            Button("全体") {
+                manualZoom = 1
+                manualOffset = .zero
+            }.font(.caption)
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16)
+        .disabled(selectedRect != nil)
+        .accessibilityHint("ピンチでも拡大できます。移動で位置を合わせ、範囲選択で囲みます")
     }
 
     private var selectionControls: some View {
@@ -381,19 +431,19 @@ struct PhotoReaderView: View {
 
     private func imageCanvas(w: CGFloat, h: CGFloat) -> some View {
         // 選択枠と写真に同じ変換を適用し、選択箇所を画面中央へ拡大する。
-        let scale: CGFloat = selectedRect.map { min(5, max(1, min(0.82 / $0.width, 0.72 / $0.height))) } ?? 1
+        let scale: CGFloat = selectedRect.map { min(8, max(1, min(0.82 / $0.width, 0.72 / $0.height))) } ?? min(8, max(1, manualZoom * magnification))
         let offset = selectedRect.map {
             CGSize(width: (0.5 - $0.midX) * w * scale,
                    height: (0.5 - $0.midY) * h * scale)
-        } ?? .zero
+        } ?? manualOffset
         return ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 Image(uiImage: image).resizable().frame(width: w, height: h)
                 if let rect = selectedRect {
                     selectionOutline(rect, w: w, h: h, scale: scale)
                 } else if let start = dragStart, let end = dragEnd {
-                    let rect = normalizedRect(start: start, end: end, w: w, h: h)
-                    selectionOutline(rect, w: w, h: h, scale: 1)
+                    let rect = normalizedRect(start: start, end: end, w: w, h: h, scale: scale, offset: offset)
+                    selectionOutline(rect, w: w, h: h, scale: scale)
                 }
             }
             .frame(width: w, height: h)
@@ -405,7 +455,13 @@ struct PhotoReaderView: View {
             Color.clear.contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        guard selectedRect == nil, !busy else { return }
+                        guard selectedRect == nil, !busy, !pinching else { return }
+                        if moveMode {
+                            if panStart == nil { panStart = manualOffset }
+                            manualOffset = CGSize(width: (panStart?.width ?? 0) + value.translation.width,
+                                                  height: (panStart?.height ?? 0) + value.translation.height)
+                            return
+                        }
                         if dragStart == nil {
                             pageFieldFocused = false
                             dragStart = value.startLocation
@@ -413,11 +469,11 @@ struct PhotoReaderView: View {
                         dragEnd = value.location
                     }
                     .onEnded { value in
-                        defer { dragStart = nil; dragEnd = nil }
-                        guard selectedRect == nil, !busy else { return }
+                        defer { dragStart = nil; dragEnd = nil; panStart = nil }
+                        guard selectedRect == nil, !busy, !pinching, !moveMode else { return }
                         let rect = normalizedRect(start: dragStart ?? value.startLocation,
-                                                  end: value.location, w: w, h: h)
-                        guard rect.width * w > 12, rect.height * h > 8 else { return }
+                                                  end: value.location, w: w, h: h, scale: scale, offset: offset)
+                        guard rect.width * w * scale > 12, rect.height * h * scale > 8 else { return }
                         guard let pn = pageNumber, pn > 0 else {
                             message = "ページ番号を入力してください"; return
                         }
@@ -445,13 +501,27 @@ struct PhotoReaderView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("付箋: \(sticky.heading)")
                         .accessibilityHint("タップしてメモを開く")
-                        .position(x: min(max(22, rect.maxX * w), w - 22),
-                                  y: min(max(22, rect.minY * h), h - 22))
+                        .position(x: (rect.maxX - 0.5) * w * scale + w / 2 + offset.width,
+                                  y: (rect.minY - 0.5) * h * scale + h / 2 + offset.height)
                     }
                 }
             }
         }
         .frame(width: w, height: h)
+        .simultaneousGesture(MagnificationGesture()
+            .updating($magnification) { value, state, _ in
+                if selectedRect == nil { state = value }
+            }
+            .onChanged { _ in
+                guard selectedRect == nil else { return }
+                pinching = true
+                dragStart = nil; dragEnd = nil
+            }
+            .onEnded { value in
+                if selectedRect == nil { manualZoom = min(8, max(1, manualZoom * value)) }
+                // 同時認識しているドラッグの終了を範囲選択として扱わない。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { pinching = false }
+            })
     }
 
     private func selectionOutline(_ rect: CGRect, w: CGFloat, h: CGFloat, scale: CGFloat) -> some View {
@@ -461,12 +531,10 @@ struct PhotoReaderView: View {
             .position(x: rect.midX * w, y: rect.midY * h)
     }
 
-    private func normalizedRect(start: CGPoint, end: CGPoint, w: CGFloat, h: CGFloat) -> CGRect {
-        let x1 = min(max(start.x / max(w, 1), 0), 1)
-        let y1 = min(max(start.y / max(h, 1), 0), 1)
-        let x2 = min(max(end.x / max(w, 1), 0), 1)
-        let y2 = min(max(end.y / max(h, 1), 0), 1)
-        return CGRect(x: min(x1, x2), y: min(y1, y2), width: abs(x2 - x1), height: abs(y2 - y1))
+    private func normalizedRect(start: CGPoint, end: CGPoint, w: CGFloat, h: CGFloat,
+                                scale: CGFloat, offset: CGSize) -> CGRect {
+        ReaderCoordinates.selection(start: start, end: end, size: CGSize(width: w, height: h),
+                                    scale: scale, offset: offset)
     }
 
     private func recognizeSelection(_ rect: CGRect, page: Int) {
@@ -517,21 +585,43 @@ struct PhotoReaderView: View {
     }
 
     private func updateCachedPins() {
-        guard wholeLoaded else { cachedPins = [:]; return }
+        matchingTask?.cancel()
+        matchingID = nil
+        guard wholeLoaded else { cachedPins = [:]; restoring = false; return }
         let texts = wholeLines.map { $0.text }
-        var pins: [UUID: CGRect] = [:]
-        for sticky in activeStickies where localPins[sticky.id] == nil {
-            if let index = findBestLine(marker: sticky.marker, lines: texts) {
-                pins[sticky.id] = wholeLines[index].rect
+        let rects = wholeLines.map { $0.rect }
+        let markers = activeStickies.filter { localPins[$0.id] == nil }.map { ($0.id, $0.marker) }
+        let id = UUID()
+        matchingID = id
+        restoring = true
+        matchingTask = Task { @MainActor in
+            // SwiftData オブジェクトを渡さず、値だけで照合する。
+            let worker = Task.detached(priority: .userInitiated) { () -> [UUID: CGRect] in
+                var pins: [UUID: CGRect] = [:]
+                for (stickyID, marker) in markers {
+                    guard !Task.isCancelled else { return [:] }
+                    if let range = findBestPassage(marker: marker, lines: texts) {
+                        pins[stickyID] = range.reduce(CGRect.null) { $0.union(rects[$1]) }
+                    }
+                }
+                return pins
             }
+            let pins = await withTaskCancellationHandler(operation: { await worker.value },
+                                                         onCancel: { worker.cancel() })
+            guard !Task.isCancelled, matchingID == id else { return }
+            cachedPins = pins
+            restoring = false
+            matchingTask = nil
+            let unmatched = markers.count - pins.count
+            message = unmatched > 0 ? "位置を特定できない付箋が\(unmatched)枚あります。ページ番号を確認するか、付箋一覧から開けます" : nil
         }
-        cachedPins = pins
     }
 
     private func loadWholePage() {
         guard !wholeLoaded, !busy, selectedRect == nil else { return }
         busy = true
         let id = UUID()
+        let pageAtStart = pageNumber
         recognitionID = id
         recognitionTask = Task { @MainActor in
             let result = await OCR.recognize(image)
@@ -541,7 +631,7 @@ struct PhotoReaderView: View {
             wholeLines = result.lines
             wholeLoaded = !result.lines.isEmpty
             busy = false
-            if pageNumber == nil, let pn = result.pageNumber {
+            if pageNumber == pageAtStart, let pn = result.pageNumber {
                 pageNumber = pn; pageText = String(pn)
             }
             updateCachedPins()
@@ -586,22 +676,43 @@ struct StickyEditor: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Bindable var sticky: Sticky
+    @State private var summarizing = false
+    @State private var summaryMessage: String?
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("目印") {
-                    Text(sticky.marker).font(.subheadline)
-                    if !sticky.clipBefore.isEmpty || !sticky.clipAfter.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(sticky.clipBefore, id: \.self) {
-                                Text($0).foregroundStyle(.secondary)
+                Section("要点") {
+                    if let summary = sticky.summarizedText, !summary.isEmpty {
+                        Text(summary).font(.body).textSelection(.enabled)
+                        Text("端末内AIによる要約。原文と照らし合わせて確認できます")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text(sticky.heading).font(.headline)
+                        Text(sticky.marker).font(.subheadline).lineLimit(3)
+                    }
+                    if AIHelper.isAvailable {
+                        Button {
+                            Task { await summarize() }
+                        } label: {
+                            HStack {
+                                if summarizing { ProgressView() }
+                                Label(summarizing ? "要点を整理中…" : "端末内AIで整理", systemImage: "sparkles")
                             }
-                            Text(sticky.marker).bold()
-                            ForEach(sticky.clipAfter, id: \.self) {
-                                Text($0).foregroundStyle(.secondary)
-                            }
-                        }.font(.caption)
+                        }.disabled(summarizing)
+                    } else {
+                        Text("この端末ではAI要約を利用できません。原文は下から確認できます")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let summaryMessage { Text(summaryMessage).font(.caption).foregroundStyle(.secondary) }
+                }
+                Section {
+                    DisclosureGroup("原文と前後の文章") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(sticky.clipBefore.joined(separator: "\n")).foregroundStyle(.secondary)
+                            Text(sticky.marker).textSelection(.enabled)
+                            Text(sticky.clipAfter.joined(separator: "\n")).foregroundStyle(.secondary)
+                        }.font(.subheadline)
                     }
                 }
                 Section("メモ") {
@@ -609,7 +720,6 @@ struct StickyEditor: View {
                         .lineLimit(3...6)
                         .onChange(of: sticky.memo) { _, v in
                             sticky.heading = Sticky.makeHeading(memo: v, marker: sticky.marker)
-                            AIHelper.improveHeading(for: sticky)
                         }
                 }
                 Section("色") {
@@ -632,6 +742,9 @@ struct StickyEditor: View {
                     }
                 }
             }
+            .task(id: sticky.id) {
+                if sticky.summarizedText == nil { await summarize() }
+            }
             .navigationTitle("付箋")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -641,6 +754,18 @@ struct StickyEditor: View {
             }
         }
     }
+    @MainActor private func summarize() async {
+        guard !summarizing, AIHelper.isAvailable else { return }
+        summarizing = true
+        summaryMessage = nil
+        defer { summarizing = false }
+        let marker = sticky.marker
+        let result = await AIHelper.summarize(marker: marker, before: sticky.clipBefore, after: sticky.clipAfter)
+        guard !Task.isCancelled, sticky.modelContext != nil, sticky.marker == marker else { return }
+        if let result { sticky.summarizedText = result }
+        else { summaryMessage = "要約を作成できませんでした。原文はそのまま保存されています" }
+    }
+
 }
 
 // MARK: - 部品
@@ -691,5 +816,19 @@ struct CameraPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.onImage(nil)
         }
+    }
+}
+
+// 画面上のドラッグを元画像の正規化座標へ戻す。ズームと移動の両方を考慮する。
+enum ReaderCoordinates {
+    static func selection(start: CGPoint, end: CGPoint, size: CGSize,
+                          scale: CGFloat, offset: CGSize) -> CGRect {
+        func point(_ p: CGPoint) -> CGPoint {
+            let x = ((p.x - size.width / 2 - offset.width) / max(scale, 1) + size.width / 2) / max(size.width, 1)
+            let y = ((p.y - size.height / 2 - offset.height) / max(scale, 1) + size.height / 2) / max(size.height, 1)
+            return CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+        }
+        let a = point(start), b = point(end)
+        return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 }

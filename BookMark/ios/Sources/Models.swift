@@ -49,6 +49,8 @@ final class Sticky {
     var clipAfter: [String]
     var memo: String
     var heading: String
+    // 表示用要約。復元に使う marker は原文のまま保持する。
+    var summarizedText: String? = nil
     var colorRaw: String
     var importance: Int
     var order: Double
