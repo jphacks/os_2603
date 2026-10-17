@@ -1,0 +1,14 @@
+# --- Web prototype (Vite/React) ---
+node_modules/
+dist/
+*.log
+.vite/
+
+# --- iOS native (Xcode) ---
+DerivedData/
+build/
+*.xcuserstate
+**/xcuserdata/
+
+# --- macOS ---
+.DS_Store

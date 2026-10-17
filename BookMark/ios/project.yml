@@ -1,0 +1,27 @@
+name: BookMark
+options:
+  bundleIdPrefix: com.bookmark
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  BookMark:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.Manasuta.BookMark
+        GENERATE_INFOPLIST_FILE: "YES"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_NSCameraUsageDescription: "本のページを撮影してOCRするために使います"
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "本のページ画像を選んでOCRするために使います"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "メモを声で入力するために使います"
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "メモを声で入力するために使います"
