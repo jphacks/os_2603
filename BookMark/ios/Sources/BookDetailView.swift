@@ -14,11 +14,22 @@ struct BookDetailView: View {
     @State private var editing: Sticky?
     @State private var showFlip = false
     @State private var showReview = false
+    @State private var showMastered = false
+
+    // 剥がしフロー
+    @State private var peelQuizSticky: Sticky?
+    @State private var trashSticky: Sticky?
+    @State private var undoSticky: Sticky?
+    @State private var showUndo = false
 
     private var placed: [Sticky] {
-        book.stickies.filter { $0.placed }
+        book.stickies
+            .filter { $0.placed && !$0.mastered }
             .sorted { ($0.pageNumber, $0.order) < ($1.pageNumber, $1.order) }
     }
+
+    private var masteredCount: Int { book.stickies.filter { $0.mastered }.count }
+    private var totalPlaced: Int { book.stickies.filter { $0.placed }.count }
 
     var body: some View {
         Group {
@@ -37,6 +48,32 @@ struct BookDetailView: View {
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
+        .sheet(item: $peelQuizSticky) { sticky in
+            PeelQuizView(
+                sticky: sticky,
+                onMastered: {
+                    peelQuizSticky = nil
+                    trashSticky = sticky
+                },
+                onReturn: {
+                    peelQuizSticky = nil
+                }
+            )
+            .presentationDetents([.large])
+        }
+        .fullScreenCover(item: $trashSticky) { sticky in
+            TrashGameView(
+                sticky: sticky,
+                onSuccess: { markMastered(sticky) },
+                onDismiss: {
+                    trashSticky = nil
+                    markMastered(sticky)  // スキップしても覚えた扱い
+                }
+            )
+        }
+        .sheet(isPresented: $showMastered) {
+            MasteredView(book: book)
+        }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { img in
                 showCamera = false
@@ -45,18 +82,70 @@ struct BookDetailView: View {
             .ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showFlip) {
-            FlipView(stickies: placed, bookTitle: book.title) { showFlip = false }
+            FlipView(
+                stickies: placed,
+                bookTitle: book.title,
+                onMastered: { s in markMastered(s) },
+                onClose: { showFlip = false })
         }
         .fullScreenCover(isPresented: $showReview) {
-            ReviewView(stickies: placed) { showReview = false }
+            ReviewView(
+                stickies: placed,
+                onMastered: { s in markMastered(s) },
+                onClose: { showReview = false })
         }
         .onChange(of: pickerItem) { _, newItem in loadPicked(newItem) }
         .onAppear { AppStore.lastBookId = book.id.uuidString }
+        .overlay(alignment: .bottom) { undoToast }
     }
+
+    // MARK: - 剥がし処理
+
+    private func handlePeel(_ sticky: Sticky) {
+        peelQuizSticky = sticky
+    }
+
+    private func markMastered(_ sticky: Sticky) {
+        sticky.mastered = true
+        sticky.masteredAt = .now
+        trashSticky = nil
+        undoSticky = sticky
+        withAnimation { showUndo = true }
+        Task {
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            await MainActor.run {
+                withAnimation { showUndo = false }
+            }
+        }
+    }
+
+    @ViewBuilder private var undoToast: some View {
+        if showUndo, let s = undoSticky {
+            HStack(spacing: 12) {
+                Text("付箋を剥がしました")
+                    .font(.subheadline)
+                Spacer()
+                Button("元に戻す") {
+                    s.mastered = false; s.masteredAt = nil
+                    withAnimation { showUndo = false }
+                }
+                .font(.subheadline).bold()
+            }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+            .background(.black.opacity(0.88))
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 16).padding(.bottom, 24)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    // MARK: - 撮影・一覧
 
     private var captureAndList: some View {
         ScrollView {
             VStack(spacing: 12) {
+                // 撮影ボタン群
                 HStack(spacing: 10) {
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
                         Button { showCamera = true } label: {
@@ -78,9 +167,24 @@ struct BookDetailView: View {
                 }
                 .buttonStyle(CaptureButton(ghost: true))
 
-                Text("📸 撮ったら、付箋を貼りたい部分を指でなぞって囲むだけ")
+                Text("撮ったら、付箋を貼りたい部分を指でなぞって囲むだけ")
                     .font(.caption).foregroundStyle(.secondary)
 
+                // 付箋数・覚えた数
+                if totalPlaced > 0 {
+                    HStack {
+                        Text("付箋 \(totalPlaced) 枚中 \(masteredCount) 枚を覚えた")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        if masteredCount > 0 {
+                            Button("覚えた付箋を見る") { showMastered = true }
+                                .font(.caption).foregroundStyle(.blue)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+
+                // パラパラ・復習
                 HStack(spacing: 10) {
                     Button { showFlip = true } label: {
                         Label("パラパラ", systemImage: "book").frame(maxWidth: .infinity)
@@ -93,6 +197,14 @@ struct BookDetailView: View {
                 .disabled(placed.isEmpty)
                 .padding(.top, 2)
 
+                // 書き出しボタン
+                ExportButton(book: book)
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .disabled(placed.isEmpty)
+                    .padding(.top, 2)
+
+                // 付箋一覧（剥がし対応）
                 if placed.isEmpty {
                     ContentUnavailableView(
                         "まだ付箋がありません",
@@ -101,8 +213,9 @@ struct BookDetailView: View {
                         .padding(.top, 30)
                 } else {
                     ForEach(placed) { s in
-                        Button { editing = s } label: { StickyRow(sticky: s) }
-                            .buttonStyle(.plain)
+                        StickyRow(sticky: s)
+                            .peelable { handlePeel(s) }
+                            .onTapGesture { editing = s }
                     }
                 }
             }
@@ -110,8 +223,6 @@ struct BookDetailView: View {
         }
     }
 
-    // 撮影/選択した画像を開く。ページ番号は前回の値を初期値に（開いてから付箋までを短く）。
-    // カメラ写真は回転情報を持つため、正立に焼き込んでから使う（囲んだ範囲=OCR範囲のズレ防止）。
     private func setPhoto(_ image: UIImage) {
         pageNumber = AppStore.lastPage(for: book.id)
         photo = uprightImage(image)
@@ -129,7 +240,7 @@ struct BookDetailView: View {
     }
 }
 
-// MARK: - 写真ビュー（なぞって囲む → その範囲だけOCR → 付箋）
+// MARK: - 写真ビュー（なぞって囲む → 範囲OCR → 付箋）
 
 struct PhotoReaderView: View {
     @Environment(\.modelContext) private var context
@@ -140,26 +251,28 @@ struct PhotoReaderView: View {
     var onClose: () -> Void
 
     @State private var pageText = ""
-    @State private var wholeLines: [OCRLine] = []   // 復元/タップ補助（必要時のみ全体を読む）
+    @FocusState private var pageFieldFocused: Bool  // キーボード制御
+
+    @State private var wholeLines: [OCRLine] = []
     @State private var wholeLoaded = false
+    // anchors をキャッシュして毎フレームのレーベンシュタイン計算を回避
+    @State private var cachedAnchors: [Int: Sticky] = [:]
+
     @State private var dragStart: CGPoint?
     @State private var dragEnd: CGPoint?
     @State private var busy = false
-    @State private var flash: CGRect?               // 作成直後の軽いハイライト（正規化）
+    @State private var flash: CGRect?
+    @State private var ocrPreview: (rect: CGRect, text: String)? // 選択領域に認識結果を表示
     @State private var message: String?
 
+    // ズーム
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var lastZoomScale: CGFloat = 1.0
+    @State private var panOffset: CGSize = .zero
+    @State private var lastPanOffset: CGSize = .zero
+    @State private var isPinching = false
+
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
-
-    private var lineTexts: [String] { wholeLines.map { $0.text } }
-
-    private var anchors: [Int: Sticky] {
-        guard wholeLoaded, let pn = pageNumber else { return [:] }
-        var map: [Int: Sticky] = [:]
-        for s in book.stickies where s.placed && s.pageNumber == pn {
-            if let i = findBestLine(marker: s.marker, lines: lineTexts) { map[i] = s }
-        }
-        return map
-    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -167,94 +280,53 @@ struct PhotoReaderView: View {
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = w * image.size.height / max(image.size.width, 1)
-                ZStack(alignment: .topLeading) {
-                    Image(uiImage: image).resizable().frame(width: w, height: h)
-
-                    if wholeLoaded {
-                        ForEach(Array(wholeLines.enumerated()), id: \.element.id) { idx, line in
-                            let r = line.rect
-                            let st = anchors[idx]
-                            Rectangle()
-                                .fill((st?.color.color ?? .clear).opacity(st == nil ? 0.001 : 0.35))
-                                .overlay(alignment: .trailing) {
-                                    if let s = st {
-                                        Text(String(repeating: "★", count: s.importance))
-                                            .font(.system(size: 9)).bold()
-                                            .padding(.horizontal, 3)
-                                            .background(s.color.color)
-                                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                                            .offset(x: 6)
-                                    }
-                                }
-                                .frame(width: r.width * w, height: max(r.height * h, 16))
-                                .contentShape(Rectangle())
-                                .position(x: (r.minX + r.width / 2) * w, y: (r.minY + r.height / 2) * h)
-                                .onTapGesture { tapLine(idx) }
-                        }
-                    }
-
-                    if let start = dragStart, let end = dragEnd {
-                        let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
-                                          width: abs(end.x - start.x), height: abs(end.y - start.y))
-                        Rectangle()
-                            .strokeBorder(Color.accentColor, lineWidth: 2)
-                            .background(Color.accentColor.opacity(0.12))
-                            .frame(width: rect.width, height: rect.height)
-                            .position(x: rect.midX, y: rect.midY)
-                            .allowsHitTesting(false)
-                    }
-
-                    if let f = flash {
-                        Rectangle().fill(Color.yellow.opacity(0.45))
-                            .frame(width: f.width * w, height: f.height * h)
-                            .position(x: (f.minX + f.width / 2) * w, y: (f.minY + f.height / 2) * h)
-                            .allowsHitTesting(false)
-                    }
-
-                    if busy {
-                        Color.black.opacity(0.05).frame(width: w, height: h)
-                        ProgressView().position(x: w / 2, y: h / 2)
-                    }
-                }
-                .frame(width: w, height: h)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 10)
-                        .onChanged { v in
-                            if dragStart == nil { dragStart = v.startLocation }
-                            dragEnd = v.location
-                        }
-                        .onEnded { v in
-                            let start = dragStart ?? v.startLocation
-                            finishDrag(start: start, end: v.location, w: w, h: h)
-                            dragStart = nil; dragEnd = nil
-                        }
-                )
+                imageCanvas(w: w, h: h)
             }
             .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
             .padding(.horizontal, 16)
 
-            Text(pageNumber == nil
-                 ? "ページ番号を入れてから、貼りたい部分を囲んでください"
-                 : wholeLoaded ? "貼りたい部分を指でなぞって囲む（行タップでも可）"
-                               : "貼りたい部分を指でなぞって囲むと付箋ができます")
-                .font(.caption).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
+            // ヒントテキスト
+            Group {
+                if zoomScale > 1 {
+                    Text("ダブルタップでズームリセット。ピンチアウトで拡大。")
+                } else if pageNumber == nil {
+                    Text("ページ番号を入れてから、貼りたい部分を囲んでください")
+                } else if wholeLoaded {
+                    Text("貼りたい部分を指でなぞって囲む（行タップでも可）")
+                } else {
+                    Text("貼りたい部分を指でなぞって囲むと付箋ができます")
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+
             if let message {
-                Text(message).font(.caption).foregroundStyle(Color(red: 0.75, green: 0.26, blue: 0.17))
+                Text(message).font(.caption)
+                    .foregroundStyle(Color(red: 0.75, green: 0.26, blue: 0.17))
             }
             Spacer(minLength: 0)
+        }
+        .toolbar {
+            // numberPad には Done ボタンがないのでツールバーに追加
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完了") { pageFieldFocused = false }
+            }
         }
         .onAppear {
             if let pn = pageNumber { pageText = String(pn) }
             haptic.prepare()
-            // 既存付箋のあるページだけ、復元のため全体を読む（許可された例外）
             if let pn = pageNumber,
-               book.stickies.contains(where: { $0.placed && $0.pageNumber == pn }) {
+               book.stickies.contains(where: { $0.placed && !$0.mastered && $0.pageNumber == pn }) {
                 loadWholePage()
             }
         }
+        .onChange(of: wholeLines.count) { _, _ in updateCachedAnchors() }
+        .onChange(of: book.stickies.count) { _, _ in updateCachedAnchors() }
+        .onChange(of: pageNumber) { _, _ in updateCachedAnchors() }
     }
+
+    // MARK: - ヘッダー
 
     private var header: some View {
         HStack {
@@ -265,13 +337,13 @@ struct PhotoReaderView: View {
                     .frame(width: 56)
                     .textFieldStyle(.roundedBorder)
                     .keyboardType(.numberPad)
+                    .focused($pageFieldFocused)
                     .onChange(of: pageText) { _, v in
                         pageNumber = Int(v.filter { $0.isNumber })
                         if let pn = pageNumber {
                             AppStore.setLastPage(pn, for: book.id)
-                            // そのページに既存付箋があれば、復元のため全体を読む（許可された例外）
                             if !wholeLoaded,
-                               book.stickies.contains(where: { $0.placed && $0.pageNumber == pn }) {
+                               book.stickies.contains(where: { $0.placed && !$0.mastered && $0.pageNumber == pn }) {
                                 loadWholePage()
                             }
                         }
@@ -279,10 +351,23 @@ struct PhotoReaderView: View {
             }
             .font(.footnote).bold()
             Spacer()
-            if !wholeLoaded {
+            if zoomScale > 1 {
+                Button {
+                    withAnimation(.spring()) {
+                        zoomScale = 1; lastZoomScale = 1
+                        panOffset = .zero; lastPanOffset = .zero
+                    }
+                } label: {
+                    Label("リセット", systemImage: "arrow.down.left.and.arrow.up.right")
+                        .font(.footnote)
+                }
+                .buttonStyle(.bordered).tint(.secondary)
+            } else if !wholeLoaded {
                 Button {
                     loadWholePage()
-                } label: { Label("全体を読む", systemImage: "text.viewfinder").font(.footnote) }
+                } label: {
+                    Label("全体を読む", systemImage: "text.viewfinder").font(.footnote)
+                }
                 .buttonStyle(.bordered).tint(.secondary)
             }
             Button("閉じる") { onClose() }.buttonStyle(.bordered)
@@ -290,20 +375,177 @@ struct PhotoReaderView: View {
         .padding(.horizontal, 16).padding(.top, 12)
     }
 
-    // 囲んだ範囲だけOCR（周辺の行は clip 用に少し広げて読む）。
+    // MARK: - 画像キャンバス
+
+    @ViewBuilder
+    private func imageCanvas(w: CGFloat, h: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            Image(uiImage: image).resizable().frame(width: w, height: h)
+
+            // OCR 行ハイライト（Canvas で一括描画 → ForEach より高速）
+            if wholeLoaded {
+                Canvas { ctx, size in
+                    for (idx, line) in wholeLines.enumerated() {
+                        let r = line.rect
+                        let frame = CGRect(
+                            x: r.minX * size.width,
+                            y: r.minY * size.height,
+                            width: r.width * size.width,
+                            height: max(r.height * size.height, 14))
+                        if let sticky = cachedAnchors[idx] {
+                            ctx.fill(Path(frame),
+                                     with: .color(Color(uiColor: UIColor(sticky.color.color).withAlphaComponent(0.32))))
+                        }
+                    }
+                }
+                .frame(width: w, height: h)
+                .allowsHitTesting(false)
+
+                // アンカー行のラベル（Canvas 外で描く）
+                ForEach(Array(cachedAnchors.keys), id: \.self) { idx in
+                    let line = wholeLines[idx]
+                    let sticky = cachedAnchors[idx]!
+                    let r = line.rect
+                    Text(String(repeating: "★", count: sticky.importance))
+                        .font(.system(size: 8)).bold()
+                        .padding(.horizontal, 2)
+                        .background(sticky.color.color)
+                        .clipShape(RoundedRectangle(cornerRadius: 2))
+                        .position(
+                            x: (r.maxX) * w + 6,
+                            y: (r.midY) * h)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            // ドラッグ中の選択枠
+            if let start = dragStart, let end = dragEnd {
+                let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
+                                  width: abs(end.x - start.x), height: abs(end.y - start.y))
+                Rectangle()
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .background(Color.accentColor.opacity(0.1))
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    .allowsHitTesting(false)
+            }
+
+            // OCR 認識結果を選択範囲の近くに表示
+            if let preview = ocrPreview {
+                Text(String(preview.text.prefix(50)))
+                    .font(.caption2)
+                    .lineLimit(2)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.black.opacity(0.78))
+                    .foregroundStyle(.white)
+                    .cornerRadius(7)
+                    .frame(maxWidth: w * 0.7, alignment: .leading)
+                    .position(
+                        x: max(w * 0.35, min(preview.rect.midX * w, w * 0.65)),
+                        y: max(22, preview.rect.minY * h - 20))
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+
+            // 付箋作成フラッシュ
+            if let f = flash {
+                Rectangle().fill(Color.yellow.opacity(0.4))
+                    .frame(width: f.width * w, height: f.height * h)
+                    .position(x: (f.minX + f.width / 2) * w, y: (f.minY + f.height / 2) * h)
+                    .allowsHitTesting(false)
+            }
+
+            if busy {
+                Color.black.opacity(0.05).frame(width: w, height: h)
+                ProgressView().position(x: w / 2, y: h / 2)
+            }
+        }
+        .frame(width: w, height: h)
+        .contentShape(Rectangle())
+        // ズーム変換（描画のみ・ジェスチャ座標は変わらない）
+        .scaleEffect(zoomScale, anchor: .center)
+        .offset(panOffset)
+        .animation(.interactiveSpring(response: 0.3), value: panOffset)
+        .gesture(pinchGesture)
+        .gesture(
+            DragGesture(minimumDistance: 10)
+                .onChanged { v in
+                    if isPinching { return }
+                    if zoomScale > 1.05 {
+                        panOffset = CGSize(
+                            width: lastPanOffset.width + v.translation.width,
+                            height: lastPanOffset.height + v.translation.height)
+                    } else {
+                        if dragStart == nil { dragStart = v.startLocation }
+                        dragEnd = v.location
+                    }
+                }
+                .onEnded { v in
+                    if zoomScale > 1.05 {
+                        lastPanOffset = panOffset
+                    } else {
+                        let start = dragStart ?? v.startLocation
+                        finishDrag(start: start, end: v.location, w: w, h: h)
+                        dragStart = nil; dragEnd = nil
+                    }
+                }
+        )
+        .onTapGesture(count: 2) {
+            withAnimation(.spring()) {
+                zoomScale = 1; lastZoomScale = 1
+                panOffset = .zero; lastPanOffset = .zero
+            }
+        }
+        .onTapGesture { location in
+            guard zoomScale <= 1.05 else { return }
+            let nx = location.x / w
+            let ny = location.y / h
+            if let idx = wholeLines.firstIndex(where: { l in
+                let expanded = l.rect.insetBy(dx: -0.005, dy: -0.005)
+                return expanded.contains(CGPoint(x: nx, y: ny))
+            }) {
+                tapLine(idx)
+            }
+        }
+    }
+
+    private var pinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                isPinching = true
+                zoomScale = max(1, min(5, lastZoomScale * value))
+            }
+            .onEnded { _ in
+                lastZoomScale = zoomScale
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isPinching = false
+                }
+            }
+    }
+
+    // MARK: - アンカーキャッシュ更新（負荷の高いレーベンシュタインを再描画ごとに走らせない）
+
+    private func updateCachedAnchors() {
+        guard wholeLoaded, let pn = pageNumber else { cachedAnchors = [:]; return }
+        let texts = wholeLines.map { $0.text }
+        var map: [Int: Sticky] = [:]
+        for s in book.stickies where s.placed && !s.mastered && s.pageNumber == pn {
+            if let i = findBestLine(marker: s.marker, lines: texts) { map[i] = s }
+        }
+        cachedAnchors = map
+    }
+
+    // MARK: - ドラッグ完了 → 範囲 OCR
+
     private func finishDrag(start: CGPoint, end: CGPoint, w: CGFloat, h: CGFloat) {
         let vx = min(start.x, end.x), vy = min(start.y, end.y)
         let vw = abs(end.x - start.x), vh = abs(end.y - start.y)
-        guard vw > 12, vh > 8 else { return }       // 小さすぎる操作は無視
-        guard let pn = pageNumber else {
-            show("ページ番号を入れてください"); return
-        }
-        let rect = CGRect(x: vx / w, y: vy / h, width: vw / w, height: vh / h)
+        guard vw > 12, vh > 8 else { return }
+        guard let pn = pageNumber else { show("ページ番号を入れてください"); return }
+        let rect = CGRect(x: vx/w, y: vy/h, width: vw/w, height: vh/h)
 
-        busy = true
-        message = nil
+        busy = true; message = nil
         Task {
-            // clip 用に上下を少し広げる
             let pad = max(0.03, Double(rect.height) * 0.9)
             let expanded = CGRect(
                 x: max(0, rect.minX - 0.02),
@@ -313,45 +555,58 @@ struct PhotoReaderView: View {
             let lines = await OCR.recognize(image, regionOfInterest: expanded).lines
 
             func centerY(_ l: OCRLine) -> CGFloat { l.rect.midY }
-            let sel = lines.filter { centerY($0) >= rect.minY && centerY($0) <= rect.maxY }
+            let sel    = lines.filter { centerY($0) >= rect.minY && centerY($0) <= rect.maxY }
             let before = lines.filter { centerY($0) < rect.minY }
-            let after = lines.filter { centerY($0) > rect.maxY }
+            let after  = lines.filter { centerY($0) > rect.maxY }
 
             let markerLines = sel.isEmpty ? lines : sel
-            let marker = markerLines.map { $0.text }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+            let marker = markerLines.map { $0.text }.joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
 
             await MainActor.run {
                 busy = false
                 guard !marker.isEmpty else { show("文字が読み取れませんでした"); return }
                 let clipBefore = before.suffix(2).map { $0.text }
-                let clipAfter = after.prefix(2).map { $0.text }
+                let clipAfter  = after.prefix(2).map { $0.text }
                 createSticky(pageNumber: pn, marker: marker,
                              clipBefore: clipBefore, clipAfter: Array(clipAfter))
+                // 選択範囲に認識テキストを一時表示
+                withAnimation(.easeOut(duration: 0.15)) {
+                    ocrPreview = (rect: rect, text: marker)
+                }
                 flashRect(rect)
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_200_000_000)
+                    await MainActor.run {
+                        withAnimation { ocrPreview = nil }
+                    }
+                }
             }
         }
     }
 
-    // 行をタップ（補助）。全体を読んである時だけ有効。
+    // MARK: - 行タップ
+
     private func tapLine(_ i: Int) {
-        if let s = anchors[i] { onEdit(s); return }
+        if let s = cachedAnchors[i] { onEdit(s); return }
         guard let pn = pageNumber else { show("ページ番号を入れてください"); return }
-        let texts = lineTexts
+        let texts = wholeLines.map { $0.text }
         if normalizeText(texts[i]).isEmpty { return }
-        let before = Array(texts[max(0, i - 2)..<i])
-        let after = Array(texts[(i + 1)..<min(texts.count, i + 3)])
+        let before = Array(texts[max(0, i-2)..<i])
+        let after  = Array(texts[(i+1)..<min(texts.count, i+3)])
         createSticky(pageNumber: pn, marker: texts[i], clipBefore: before, clipAfter: after)
     }
 
     private func createSticky(pageNumber pn: Int, marker: String,
-                              clipBefore: [String], clipAfter: [String]) {
+                               clipBefore: [String], clipAfter: [String]) {
         let color = StickyColor.cycle(book.stickies.count)
         let sticky = Sticky(
             pageNumber: pn, placed: true, marker: marker,
             clipBefore: clipBefore, clipAfter: clipAfter, color: color, book: book)
         context.insert(sticky)
         AppStore.setLastPage(pn, for: book.id)
-        haptic.impactOccurred()       // 触覚フィードバック
+        haptic.impactOccurred()
+        AIHelper.improveHeading(for: sticky)  // AI が使えれば非同期で見出しを更新
     }
 
     private func loadWholePage() {
@@ -366,6 +621,7 @@ struct PhotoReaderView: View {
                     pageNumber = pn; pageText = String(pn)
                 }
                 busy = false
+                updateCachedAnchors()
             }
         }
     }
@@ -446,6 +702,7 @@ struct StickyEditor: View {
                         .lineLimit(3...6)
                         .onChange(of: sticky.memo) { _, v in
                             sticky.heading = Sticky.makeHeading(memo: v, marker: sticky.marker)
+                            AIHelper.improveHeading(for: sticky)
                         }
                 }
                 Section("色") {
@@ -464,8 +721,7 @@ struct StickyEditor: View {
                 }
                 Section {
                     Button("削除", role: .destructive) {
-                        context.delete(sticky)
-                        dismiss()
+                        context.delete(sticky); dismiss()
                     }
                 }
             }
@@ -498,7 +754,6 @@ struct CaptureButton: ButtonStyle {
     }
 }
 
-// 回転情報を画素に焼き込み、orientation を .up にそろえた画像を返す。
 func uprightImage(_ image: UIImage) -> UIImage {
     guard image.imageOrientation != .up else { return image }
     let format = UIGraphicsImageRendererFormat.default()

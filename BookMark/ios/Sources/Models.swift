@@ -1,17 +1,16 @@
 import SwiftUI
 import SwiftData
 
-// 付箋の色（A13/A17: 重要度・色の意味づけ）。
 enum StickyColor: String, CaseIterable, Codable {
     case yellow, pink, blue, green, purple
 
     var color: Color {
         switch self {
         case .yellow: return Color(red: 1.0, green: 0.878, blue: 0.4)
-        case .pink: return Color(red: 1.0, green: 0.62, blue: 0.71)
-        case .blue: return Color(red: 0.557, green: 0.776, blue: 1.0)
-        case .green: return Color(red: 0.655, green: 0.89, blue: 0.627)
-        case .purple: return Color(red: 0.78, green: 0.659, blue: 1.0)
+        case .pink:   return Color(red: 1.0, green: 0.62,  blue: 0.71)
+        case .blue:   return Color(red: 0.557, green: 0.776, blue: 1.0)
+        case .green:  return Color(red: 0.655, green: 0.89,  blue: 0.627)
+        case .purple: return Color(red: 0.78,  green: 0.659, blue: 1.0)
         }
     }
 
@@ -40,21 +39,23 @@ final class Book {
     }
 }
 
-// 付箋。画像は保存せず「本・ページ番号・目印・メモ・周辺の切り抜き」だけを持つ（設計の核）。
 @Model
 final class Sticky {
     var id: UUID
     var pageNumber: Int
-    var placed: Bool          // A5: 位置未定(false)＝写真なしメモ
-    var marker: String        // 目印（貼った行の文字）
-    var clipBefore: [String]  // 周辺の切り抜き（B3: 本が無くても思い出す）
+    var placed: Bool
+    var marker: String
+    var clipBefore: [String]
     var clipAfter: [String]
     var memo: String
-    var heading: String       // 一言見出し（本番はAI、今は簡易生成）
+    var heading: String
     var colorRaw: String
-    var importance: Int       // 1..3
+    var importance: Int
     var order: Double
     var createdAt: Date
+    // 覚えたフラグ（剥がして捨てた = mastered）。データは消さない。
+    var mastered: Bool
+    var masteredAt: Date?
     var book: Book?
 
     init(pageNumber: Int, placed: Bool, marker: String,
@@ -72,6 +73,8 @@ final class Sticky {
         self.importance = 2
         self.order = Date().timeIntervalSince1970
         self.createdAt = .now
+        self.mastered = false
+        self.masteredAt = nil
         self.book = book
     }
 
@@ -80,7 +83,6 @@ final class Sticky {
         set { colorRaw = newValue.rawValue }
     }
 
-    // 付箋ごとの一言見出し（本番はAI、試作では簡易生成）。
     static func makeHeading(memo: String, marker: String) -> String {
         let base = (memo.isEmpty ? marker : memo)
             .trimmingCharacters(in: .whitespacesAndNewlines)
