@@ -60,6 +60,11 @@ final class Sticky {
     // 覚えたフラグ（剥がして捨てた = mastered）。データは消さない。
     var mastered: Bool
     var masteredAt: Date?
+    var reviewEnabled: Bool = false
+    var reviewStyle: String? = nil
+    var cropImageData: Data? = nil
+    var nextReviewDate: Date? = nil
+    var reviewInterval: Int = 1
     var book: Book?
 
     init(pageNumber: Int, placed: Bool, marker: String,
@@ -79,6 +84,11 @@ final class Sticky {
         self.createdAt = .now
         self.mastered = false
         self.masteredAt = nil
+        self.reviewEnabled = false
+        self.reviewStyle = nil
+        self.cropImageData = nil
+        self.nextReviewDate = nil
+        self.reviewInterval = 1
         self.book = book
     }
 

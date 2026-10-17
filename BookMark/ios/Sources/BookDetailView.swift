@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import SwiftData
 import PhotosUI
@@ -6,9 +7,6 @@ import UIKit
 struct BookDetailView: View {
     @Environment(\.modelContext) private var context
     @Bindable var book: Book
-    /// 起動直後に開かれたときだけ true。画面が出たらすぐカメラを起動する。
-    var openCameraOnAppear = false
-    var onCameraOpened: () -> Void = {}
 
     @State private var photo: UIImage?
     @State private var pageNumber: Int?
@@ -20,6 +18,7 @@ struct BookDetailView: View {
     @State private var showMastered = false
     @State private var showQuickMemo = false
 
+    @State private var showCameraAlert = false
     @State private var undoSticky: Sticky?
     @State private var showUndo = false
 
@@ -74,6 +73,16 @@ struct BookDetailView: View {
             }
             .ignoresSafeArea()
         }
+        .alert("カメラへのアクセスが許可されていません", isPresented: $showCameraAlert) {
+            Button("設定を開く") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("設定 → BookMark → カメラ をオンにしてください")
+        }
         .fullScreenCover(isPresented: $showFlip) {
             FlipView(
                 stickies: placed,
@@ -84,26 +93,11 @@ struct BookDetailView: View {
         .fullScreenCover(isPresented: $showReview) {
             ReviewView(
                 stickies: placed,
-                onMastered: { s in markMastered(s) },
                 onClose: { showReview = false })
         }
         .onChange(of: pickerItem) { _, newItem in loadPicked(newItem) }
-        .onAppear {
-            AppStore.lastBookId = book.id.uuidString
-            openCameraIfLaunching()
-        }
+        .onAppear { AppStore.lastBookId = book.id.uuidString }
         .overlay(alignment: .bottom) { undoToast }
-    }
-
-    // MARK: - 起動直後のカメラ
-
-    private func openCameraIfLaunching() {
-        guard openCameraOnAppear else { return }
-        onCameraOpened()   // 一度だけ（戻ってきたときに再び開かない）
-        // カメラが無い端末（シミュレータ）では本の画面のまま
-        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
-        // 画面遷移のアニメーションが終わってから出す（同時だと表示されないことがある）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showCamera = true }
     }
 
     private func markMastered(_ sticky: Sticky) {
@@ -165,7 +159,14 @@ struct BookDetailView: View {
                 // 撮影ボタン群
                 HStack(spacing: 10) {
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button { showCamera = true } label: {
+                        Button {
+                            let status = AVCaptureDevice.authorizationStatus(for: .video)
+                            if status == .denied || status == .restricted {
+                                showCameraAlert = true
+                            } else {
+                                showCamera = true
+                            }
+                        } label: {
                             Label("カメラで撮る", systemImage: "camera.fill")
                                 .frame(maxWidth: .infinity)
                         }
@@ -251,8 +252,8 @@ struct BookDetailView: View {
                             }
                             ForEach(group.stickies) { s in
                                 StickyRow(sticky: s)
-                                    .peelable { handlePeel(s) }
                                     .onTapGesture { editing = s }
+                                    .peelable(tint: s.color.color) { markMastered(s) }
                             }
                         }
                         .id("page-\(group.page)")
@@ -383,6 +384,8 @@ struct PhotoReaderView: View {
             haptic.prepare()
             if book.stickies.contains(where: { $0.placed && !$0.mastered }) { loadWholePage() }
             autoDetectPage()
+            // キーボードを裏で事前ロード（初回表示の遅延対策）
+            preWarmKeyboard()
         }
         .onDisappear {
             cancelSelection()
@@ -458,24 +461,24 @@ struct PhotoReaderView: View {
                 Text(draft.marker).font(.caption).lineLimit(3)
                     .foregroundStyle(.secondary)
             } else {
-                Text(busy ? "文字を読み取っています…" : "読み取れませんでした。選び直すか再試行してください")
+                Text(busy ? "文字を読み取っています…" : "テキストが読み取れませんでした")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
                 Button("選び直す") { cancelSelection() }
                     .buttonStyle(.bordered)
                 Spacer()
-                if draft == nil && !busy {
-                    Button("再試行") {
-                        if let rect = selectedRect, let pn = draftPage { recognizeSelection(rect, page: pn) }
-                    }.buttonStyle(.bordered)
-                } else {
+                if !busy {
+                    if draft == nil {
+                        Button("再試行") {
+                            if let rect = selectedRect, let pn = draftPage { recognizeSelection(rect, page: pn) }
+                        }.buttonStyle(.bordered)
+                    }
                     Button { confirmSelection() } label: {
-                        Label("付箋を追加", systemImage: "pin.fill")
+                        Label(draft == nil ? "図として追加" : "付箋を追加", systemImage: "pin.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(BooksStyle.ink)
-                    .disabled(draft == nil || busy)
                 }
             }
         }
@@ -614,33 +617,54 @@ struct PhotoReaderView: View {
     }
 
     private func confirmSelection() {
-        guard !busy, let draft, let rect = selectedRect,
+        guard !busy, let rect = selectedRect,
               let page = draftPage, pageNumber == page else { return }
+        let markerText = draft?.marker ?? "(図)"
         let sticky: Sticky
         // A5：このページに位置未定のメモがあれば、それを配置する（新規作成しない）。
         if let pending = book.stickies
             .filter({ !$0.placed && !$0.mastered && $0.pageNumber == page })
             .min(by: { $0.createdAt < $1.createdAt }) {
             pending.placed = true
-            pending.marker = draft.marker
-            pending.clipBefore = draft.before
-            pending.clipAfter = draft.after
+            pending.marker = markerText
+            pending.clipBefore = draft?.before ?? []
+            pending.clipAfter = draft?.after ?? []
             if pending.heading.isEmpty || pending.heading == "付箋" {
-                pending.heading = Sticky.makeHeading(memo: "", marker: draft.marker)
+                pending.heading = Sticky.makeHeading(memo: "", marker: markerText)
             }
             sticky = pending
         } else {
-            sticky = Sticky(pageNumber: page, placed: true, marker: draft.marker,
-                            clipBefore: draft.before, clipAfter: draft.after,
+            sticky = Sticky(pageNumber: page, placed: true, marker: markerText,
+                            clipBefore: draft?.before ?? [], clipAfter: draft?.after ?? [],
                             color: StickyColor.cycle(book.stickies.count), book: book)
             context.insert(sticky)
         }
+        let markerTrimmed = markerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isQuestion = markerTrimmed.hasSuffix("?") || markerTrimmed.hasSuffix("？")
+        sticky.reviewEnabled = isQuestion
+        if isQuestion {
+            sticky.reviewStyle = "qa"
+            NotificationScheduler.scheduleInitial(for: sticky)
+        }
+        sticky.cropImageData = cropRegion(image, normalizedRect: rect)
         localPins[sticky.id] = rect
         AppStore.setLastPage(page, for: book.id)
         AIHelper.improveHeading(for: sticky)
         cancelSelection()
         haptic.impactOccurred()
         onEdit(sticky)
+    }
+
+    private func cropRegion(_ image: UIImage, normalizedRect rect: CGRect) -> Data? {
+        let x = rect.minX * image.size.width
+        let y = rect.minY * image.size.height
+        let w = max(rect.width * image.size.width, 1)
+        let h = max(rect.height * image.size.height, 1)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: w, height: h), format: format)
+        let cropped = renderer.image { _ in image.draw(at: CGPoint(x: -x, y: -y)) }
+        return cropped.jpegData(compressionQuality: 0.5)
     }
 
     private func cancelSelection() {
@@ -662,11 +686,20 @@ struct PhotoReaderView: View {
         let texts = wholeLines.map { $0.text }
         let rects = wholeLines.map { $0.rect }
         let markers = activeStickies.filter { localPins[$0.id] == nil }.map { ($0.id, $0.marker) }
+        // Vision照合用に cropData を値としてコピー（SwiftDataオブジェクトは渡さない）
+        let cropDataMap: [UUID: Data] = Dictionary(
+            uniqueKeysWithValues: activeStickies
+                .filter { localPins[$0.id] == nil }
+                .compactMap { s -> (UUID, Data)? in
+                    guard let d = s.cropImageData else { return nil }
+                    return (s.id, d)
+                }
+        )
         let id = UUID()
         matchingID = id
         restoring = true
         matchingTask = Task { @MainActor in
-            // SwiftData オブジェクトを渡さず、値だけで照合する。
+            // Phase 1: テキスト照合（バックグラウンド）
             let worker = Task.detached(priority: .userInitiated) { () -> [UUID: CGRect] in
                 var pins: [UUID: CGRect] = [:]
                 for (stickyID, marker) in markers {
@@ -677,8 +710,30 @@ struct PhotoReaderView: View {
                 }
                 return pins
             }
-            let pins = await withTaskCancellationHandler(operation: { await worker.value },
+            var pins = await withTaskCancellationHandler(operation: { await worker.value },
                                                          onCancel: { worker.cancel() })
+            guard !Task.isCancelled, matchingID == id else { return }
+
+            // Phase 2: Vision 特徴量照合（テキスト未一致 + cropData あり）
+            let unmatchedIDs = markers.filter { pins[$0.0] == nil && cropDataMap[$0.0] != nil }.map { $0.0 }
+            if !unmatchedIDs.isEmpty, let cgImg = image.cgImage {
+                let vWorker = Task.detached(priority: .userInitiated) { () -> [UUID: CGRect] in
+                    var vPins: [UUID: CGRect] = [:]
+                    for stickyID in unmatchedIDs {
+                        guard !Task.isCancelled, let cropData = cropDataMap[stickyID] else { continue }
+                        if #available(iOS 13, *),
+                           let rect = findByImageFeature(cropData: cropData, fullCGImage: cgImg) {
+                            vPins[stickyID] = rect
+                        }
+                    }
+                    return vPins
+                }
+                let vPins = await withTaskCancellationHandler(operation: { await vWorker.value },
+                                                              onCancel: { vWorker.cancel() })
+                guard !Task.isCancelled, matchingID == id else { return }
+                pins.merge(vPins) { existing, _ in existing }
+            }
+
             guard !Task.isCancelled, matchingID == id else { return }
             cachedPins = pins
             restoring = false
@@ -717,6 +772,24 @@ struct PhotoReaderView: View {
                 }
                 return
             }
+            // ページ番号が見つからなかった場合
+            await MainActor.run {
+                guard pageText == initial, selectedRect == nil else { return }
+                message = "ページ番号を入力してください"
+            }
+        }
+    }
+
+    private func preWarmKeyboard() {
+        DispatchQueue.main.async {
+            let tf = UITextField(frame: .zero)
+            tf.inputView = UIView() // キーボード表示を抑制
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.windows.first?.addSubview(tf)
+            tf.becomeFirstResponder()
+            tf.resignFirstResponder()
+            tf.removeFromSuperview()
         }
     }
 
@@ -777,6 +850,12 @@ struct StickyRow: View {
                     .padding(.horizontal, 2)
                     .background(sticky.color.color.opacity(0.35))
                     .lineLimit(2)
+                if let data = sticky.cropImageData, let uiImg = UIImage(data: data) {
+                    Image(uiImage: uiImg)
+                        .resizable().scaledToFit()
+                        .frame(maxHeight: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
                 if !displayMemo.isEmpty {
                     Text("📝 \(displayMemo)").font(.caption).foregroundStyle(BooksStyle.subInk)
                 }
@@ -843,6 +922,15 @@ struct StickyEditor: View {
                         .lineLimit(3...6)
                         .onChange(of: memoText) { _, v in
                             sticky.heading = Sticky.makeHeading(memo: v, marker: sticky.marker)
+                            // メモ末尾が ? なら復習対象に自動設定
+                            let trimmed = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let isQ = trimmed.hasSuffix("?") || trimmed.hasSuffix("？")
+                            if isQ != sticky.reviewEnabled {
+                                sticky.reviewEnabled = isQ
+                                sticky.reviewStyle = isQ ? "qa" : nil
+                                if isQ { NotificationScheduler.scheduleInitial(for: sticky) }
+                                else   { NotificationScheduler.cancel(stickyID: sticky.id) }
+                            }
                             encryptTask?.cancel()
                             encryptTask = Task {
                                 try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒待つ
@@ -884,6 +972,21 @@ struct StickyEditor: View {
                     Picker("重要度", selection: $sticky.importance) {
                         Text("★").tag(1); Text("★★").tag(2); Text("★★★").tag(3)
                     }.pickerStyle(.segmented)
+                }
+                Section {
+                    Toggle("復習対象にする", isOn: Binding(
+                        get: { sticky.reviewEnabled },
+                        set: { enabled in
+                            sticky.reviewEnabled = enabled
+                            if enabled {
+                                sticky.reviewStyle = "qa"
+                                NotificationScheduler.scheduleInitial(for: sticky)
+                            } else {
+                                sticky.reviewStyle = nil
+                                NotificationScheduler.cancel(stickyID: sticky.id)
+                            }
+                        }
+                    ))
                 }
                 Section {
                     Button("削除", role: .destructive) {
@@ -960,27 +1063,136 @@ func uprightImage(_ image: UIImage) -> UIImage {
     }
 }
 
-struct CameraPicker: UIViewControllerRepresentable {
+// MARK: - AVCaptureSession ベースのカメラ（UIImagePickerController より起動が速い）
+
+struct CameraPicker: View {
     var onImage: (UIImage?) -> Void
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let p = UIImagePickerController()
-        p.sourceType = .camera
-        p.delegate = context.coordinator
-        return p
-    }
-    func updateUIViewController(_ u: UIImagePickerController, context: Context) {}
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraPicker
-        init(_ p: CameraPicker) { parent = p }
-        func imagePickerController(_ picker: UIImagePickerController,
-                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            parent.onImage(info[.originalImage] as? UIImage)
+
+    @StateObject private var camera = CameraService()
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            CameraPreviewLayer(session: camera.session)
+                .ignoresSafeArea()
+
+            VStack {
+                Spacer()
+
+                HStack {
+                    Button { onImage(nil) } label: {
+                        Text("キャンセル")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.white)
+                            .frame(width: 80, height: 80)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        camera.capture()
+                    } label: {
+                        ZStack {
+                            Circle().fill(.white).frame(width: 70, height: 70)
+                            Circle().stroke(.white.opacity(0.5), lineWidth: 4)
+                                .frame(width: 80, height: 80)
+                        }
+                    }
+                    .disabled(camera.capturing)
+
+                    Spacer()
+
+                    Color.clear.frame(width: 80, height: 80)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 36)
+            }
         }
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.onImage(nil)
+        .onAppear {
+            camera.onCaptured = { img in onImage(img) }
+            camera.start()
+        }
+        .onDisappear { camera.stop() }
+    }
+}
+
+final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate {
+    let session = AVCaptureSession()
+    private let output = AVCapturePhotoOutput()
+    var onCaptured: ((UIImage) -> Void)?
+    @Published var capturing = false
+    private var configured = false
+
+    func start() {
+        guard !configured else {
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                if !session.isRunning { session.startRunning() }
+            }
+            return
+        }
+        configured = true
+        session.beginConfiguration()
+        session.sessionPreset = .photo
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input), session.canAddOutput(output) else {
+            session.commitConfiguration()
+            return
+        }
+        session.addInput(input)
+        session.addOutput(output)
+        session.commitConfiguration()
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            session.startRunning()
         }
     }
+
+    func stop() {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            session.stopRunning()
+        }
+    }
+
+    func capture() {
+        guard !capturing else { return }
+        capturing = true
+        let settings = AVCapturePhotoSettings()
+        if let conn = output.connection(with: .video) {
+            conn.videoRotationAngle = 90  // portrait
+        }
+        output.capturePhoto(with: settings, delegate: self)
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput,
+                     didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        guard let data = photo.fileDataRepresentation(),
+              let image = UIImage(data: data) else {
+            DispatchQueue.main.async { self.capturing = false }
+            return
+        }
+        DispatchQueue.main.async { [self] in
+            capturing = false
+            onCaptured?(image)
+        }
+    }
+
+    deinit { if session.isRunning { session.stopRunning() } }
+}
+
+private struct CameraPreviewLayer: UIViewRepresentable {
+    let session: AVCaptureSession
+    func makeUIView(context: Context) -> CameraHostView {
+        let v = CameraHostView()
+        v.previewLayer.session = session
+        v.previewLayer.videoGravity = .resizeAspect
+        return v
+    }
+    func updateUIView(_ v: CameraHostView, context: Context) {}
+}
+
+private final class CameraHostView: UIView {
+    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+    var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
 }
 
 // 画面上のドラッグを元画像の正規化座標へ戻す。ズームと移動の両方を考慮する。

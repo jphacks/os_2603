@@ -1,4 +1,5 @@
 import SwiftUI
+import AudioToolbox
 
 // パラパラモード: 付箋ページを順にめくる。
 
@@ -88,6 +89,11 @@ private struct FlipCard: View {
     var onMastered: () -> Void
     @Environment(VaultManager.self) private var vault
 
+    @State private var dragOffset: CGSize = .zero
+    @State private var isDismissing = false
+    private let impactHaptic = UIImpactFeedbackGenerator(style: .rigid)
+    private let successHaptic = UINotificationFeedbackGenerator()
+
     private var displayMemo: String {
         if let data = sticky.encryptedMemo { return vault.decrypt(data) ?? "" }
         return sticky.memo
@@ -99,7 +105,13 @@ private struct FlipCard: View {
                 Text("p.\(sticky.pageNumber)")
                     .font(.subheadline).bold().foregroundStyle(BooksStyle.subInk)
 
-                // 本のページのように、周りの文と付箋の行を明朝体で組む
+                if let data = sticky.cropImageData, let uiImg = UIImage(data: data) {
+                    Image(uiImage: uiImg)
+                        .resizable().scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(sticky.clipBefore, id: \.self) {
                         Text($0).foregroundStyle(BooksStyle.subInk)
@@ -127,20 +139,44 @@ private struct FlipCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
 
-                Button {
-                    onMastered()
-                } label: {
-                    Label("覚えた", systemImage: "checkmark")
-                        .font(.subheadline).bold()
-                        .frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(BooksStyle.ink)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                }
-                .padding(.top, 4)
+
             }
             .padding(.horizontal, 28).padding(.vertical, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .offset(y: isDismissing ? -1000 : dragOffset.height)
+        .opacity(isDismissing ? 0 : max(0, 1 + dragOffset.height / 400))
+        .gesture(
+            DragGesture(minimumDistance: 15)
+                .onChanged { v in
+                    guard !isDismissing, v.translation.height < 0 else { return }
+                    dragOffset = v.translation
+                }
+                .onEnded { v in
+                    guard !isDismissing else { return }
+                    if v.translation.height < -80 {
+                        peel()
+                    } else {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            dragOffset = .zero
+                        }
+                    }
+                }
+        )
+        .onAppear { impactHaptic.prepare(); successHaptic.prepare() }
+    }
+
+    private func peel() {
+        impactHaptic.impactOccurred(intensity: 1.0)
+        successHaptic.notificationOccurred(.success)
+        AudioServicesPlaySystemSound(1103) // Tock
+        withAnimation(.easeIn(duration: 0.28)) {
+            isDismissing = true
+            dragOffset = CGSize(width: 24, height: -1000)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+            NotificationScheduler.cancel(stickyID: sticky.id)
+            onMastered()
         }
     }
 }

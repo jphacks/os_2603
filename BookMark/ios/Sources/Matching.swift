@@ -1,4 +1,6 @@
 import Foundation
+import Vision
+import UIKit
 
 // 目印のあいまい一致（AIではなくアルゴリズム）。
 // 再撮影でOCRが多少ずれても、付箋を元の行へ復元する。Web版からの移植。
@@ -83,4 +85,53 @@ func findBestPassage(marker: String, lines: [String], threshold: Double = 0.65) 
         }
     }
     return best
+}
+
+// MARK: - Vision 画像特徴量による照合（テキストOCR失敗時のフォールバック）
+
+/// cropData（付箋作成時に保存したJPEG）と fullCGImage を比較し、
+/// 最も特徴が近い領域の正規化 CGRect を返す。呼び元は Task.detached から呼ぶこと。
+@available(iOS 13, *)
+func findByImageFeature(cropData: Data, fullCGImage: CGImage) -> CGRect? {
+    guard let cropUIImage = UIImage(data: cropData),
+          let cropCG = cropUIImage.cgImage,
+          let cropPrint = featurePrintSync(cgImage: cropCG) else { return nil }
+
+    // 5列×7行のグリッドを50%オーバーラップでスキャン
+    let gridX = 5, gridY = 7
+    var bestRect: CGRect?
+    var bestDist: Float = 0.85  // しきい値（小さいほど類似）
+
+    for row in 0..<gridY {
+        for col in 0..<gridX {
+            if Task.isCancelled { return nil }
+            let cw = CGFloat(1) / CGFloat(gridX)
+            let ch = CGFloat(1) / CGFloat(gridY)
+            let x = max(0.0, CGFloat(col) * cw - cw * 0.25)
+            let y = max(0.0, CGFloat(row) * ch - ch * 0.25)
+            let w = min(cw * 1.5, 1.0 - x)
+            let h = min(ch * 1.5, 1.0 - y)
+            let pixW = CGFloat(fullCGImage.width)
+            let pixH = CGFloat(fullCGImage.height)
+            let cropRect = CGRect(x: x * pixW, y: y * pixH,
+                                  width: w * pixW, height: h * pixH)
+            guard let regionCG = fullCGImage.cropping(to: cropRect),
+                  let regionPrint = featurePrintSync(cgImage: regionCG) else { continue }
+            var dist: Float = 0
+            try? cropPrint.computeDistance(&dist, to: regionPrint)
+            if dist < bestDist {
+                bestDist = dist
+                bestRect = CGRect(x: x, y: y, width: w, height: h)
+            }
+        }
+    }
+    return bestRect
+}
+
+@available(iOS 13, *)
+private func featurePrintSync(cgImage: CGImage) -> VNFeaturePrintObservation? {
+    let req = VNGenerateImageFeaturePrintRequest()
+    let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+    try? handler.perform([req])
+    return (req.results as? [VNFeaturePrintObservation])?.first
 }
