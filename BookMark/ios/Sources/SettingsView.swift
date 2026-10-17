@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Query private var books: [Book]
     @State private var confirmDeleteAll = false
+    @AppStorage("dailyStickyGoal") private var dailyGoal = 3
 
     private var stickyCount: Int { books.reduce(0) { $0 + $1.stickies.count } }
     private var version: String {
@@ -14,6 +15,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Stepper("1日の付箋の目標：\(dailyGoal) 枚", value: $dailyGoal, in: 1...20)
+                } header: {
+                    Text("目標")
+                } footer: {
+                    Text("ホームのリングに、今日貼った付箋の数が表示されます。")
+                }
+
                 Section {
                     ForEach(StickyColor.allCases, id: \.self) { CategoryNameField(color: $0) }
                 } header: {
@@ -39,8 +48,6 @@ struct SettingsView: View {
                     LabeledContent("バージョン", value: version)
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.background.ignoresSafeArea())
             .navigationTitle("設定")
             .confirmationDialog("すべての本と付箋を削除しますか？",
                                 isPresented: $confirmDeleteAll, titleVisibility: .visible) {

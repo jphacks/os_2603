@@ -40,10 +40,10 @@ struct RootTabView: View {
     var body: some View {
         TabView(selection: $appState.tab) {
             HomeView()
-                .tabItem { Label("ホーム", systemImage: "camera") }
+                .tabItem { Label("ホーム", systemImage: "house.fill") }
                 .tag(AppState.Tab.home)
             ShelfView()
-                .tabItem { Label("本", systemImage: "books.vertical") }
+                .tabItem { Label("ライブラリ", systemImage: "books.vertical") }
                 .tag(AppState.Tab.books)
             SettingsView()
                 .tabItem { Label("設定", systemImage: "gearshape") }

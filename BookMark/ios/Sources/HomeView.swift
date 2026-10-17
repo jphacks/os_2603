@@ -3,13 +3,16 @@ import SwiftData
 import PhotosUI
 import UIKit
 
-// ホーム：読んでいる本（最後に開いた本）を選んで、ページを撮る → 貼りたい部分を囲んで付箋。
+// ホーム：今日の付箋の目標（リング）→ 黒い「ページを撮る」→ 今週の記録 → 読んでいる本 → 最近の付箋。
+// 撮ったら、貼りたい部分を囲んで付箋。
 
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Book.createdAt, order: .reverse) private var books: [Book]
+    @Query private var allStickies: [Sticky]
     // AppStore.lastBookId と同じキー（最後に開いた本から始める）
     @AppStorage("bookmark.lastBookId") private var lastBookId = ""
+    @AppStorage("dailyStickyGoal") private var dailyGoal = 3
 
     @State private var photo: UIImage?
     @State private var pageNumber: Int?
@@ -21,6 +24,8 @@ struct HomeView: View {
     private var book: Book? {
         books.first { $0.id.uuidString == lastBookId } ?? books.first
     }
+
+    private var placedStickies: [Sticky] { allStickies.filter(\.placed) }
 
     var body: some View {
         NavigationStack {
@@ -56,13 +61,12 @@ struct HomeView: View {
 
     private var start: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(spacing: 28) {
                 if let book {
-                    bookSelector(book)
-                    captureButtons
-                    Text("📸 撮ったら、付箋を貼りたい部分を指でなぞって囲むだけ")
-                        .font(.caption).foregroundStyle(Theme.subInk)
-                        .frame(maxWidth: .infinity)
+                    goalSection(book)
+                    weekSection
+                    Divider()
+                    readingBooks(book)
                     recentNotes(book)
                 } else {
                     ContentUnavailableView {
@@ -71,74 +75,154 @@ struct HomeView: View {
                         Text("裏表紙のISBNバーコードをかざして、読んでいる本を登録しましょう")
                     } actions: {
                         Button("本を登録する") { showAddBook = true }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(CaptureButton())
                     }
                     .padding(.top, 60)
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
         }
     }
 
-    private func bookSelector(_ book: Book) -> some View {
-        Menu {
-            ForEach(books) { b in
-                Button {
-                    lastBookId = b.id.uuidString
-                } label: {
-                    if b.id == book.id {
-                        Label(b.title, systemImage: "checkmark")
-                    } else {
-                        Text(b.title)
-                    }
-                }
+    // MARK: - 今日の付箋（読書目標のリング）
+
+    private var todayCount: Int {
+        placedStickies.filter { Calendar.current.isDateInToday($0.createdAt) }.count
+    }
+
+    private func goalSection(_ book: Book) -> some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 6) {
+                Text("付箋の目標").font(.title2.bold()).foregroundStyle(Theme.ink)
+                Text("毎日少しずつ付箋を貼って、学んだことを本の外に残しましょう。")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.subInk)
+                    .multilineTextAlignment(.center)
             }
-            Divider()
-            Button { showAddBook = true } label: { Label("本を登録", systemImage: "plus") }
-        } label: {
-            HStack(spacing: 14) {
-                BookCoverView(book: book).frame(width: 46, height: 66)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("読んでいる本").font(.caption).foregroundStyle(Theme.subInk)
-                    Text(book.title)
-                        .font(Theme.serif(.headline))
+
+            GoalRing(progress: Double(todayCount) / Double(max(dailyGoal, 1))) {
+                VStack(spacing: 2) {
+                    Text("今日の付箋").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text("\(todayCount)")
+                        .font(.system(size: 64, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.ink)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                        .contentTransition(.numericText())
+                    Text("（目標 \(dailyGoal) 枚）").font(.footnote).foregroundStyle(Theme.subInk)
                 }
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down").foregroundStyle(Theme.subInk)
             }
-            .padding(14)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
-        }
-    }
+            .frame(width: 250, height: 210)
 
-    private var captureButtons: some View {
-        VStack(spacing: 10) {
             Button { showCamera = true } label: {
-                VStack(spacing: 10) {
-                    Image(systemName: "camera.fill").font(.system(size: 34))
+                VStack(spacing: 2) {
                     Text("ページを撮る").font(.headline)
-                    Text("撮って、貼りたい部分を囲む").font(.caption).opacity(0.85)
+                    Text(book.title).font(.caption).opacity(0.75).lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
             }
             .buttonStyle(CaptureButton())
             .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
 
-            HStack(spacing: 10) {
+            HStack(spacing: 18) {
                 PhotosPicker(selection: $pickerItem, matching: .images) {
-                    Label("写真を選ぶ", systemImage: "photo").frame(maxWidth: .infinity)
+                    Label("写真を選ぶ", systemImage: "photo")
                 }
-                .buttonStyle(CaptureButton(ghost: true))
                 Button { setPhoto(Sample.render(Sample.pages[0])) } label: {
-                    Label("サンプルで試す", systemImage: "wand.and.stars").frame(maxWidth: .infinity)
+                    Label("サンプルで試す", systemImage: "wand.and.stars")
                 }
-                .buttonStyle(CaptureButton(ghost: true))
             }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Theme.ink)
+        }
+    }
+
+    // MARK: - 今週の記録（曜日の丸）
+
+    private var weekSection: some View {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let weekday = calendar.component(.weekday, from: today)        // 1 = 日曜
+        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0 - (weekday - 1), to: today) }
+        let symbols = ["日", "月", "火", "水", "木", "金", "土"]
+        let activeDays = Set(placedStickies.map { calendar.startOfDay(for: $0.createdAt) })
+
+        return VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                ForEach(Array(days.enumerated()), id: \.offset) { i, day in
+                    let done = activeDays.contains(day)
+                    let isToday = day == today
+                    Text(symbols[i])
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .foregroundStyle(done ? .white : (day > today ? Theme.subInk.opacity(0.5) : Theme.ink))
+                        .background(Circle().fill(done ? Theme.ring : .clear))
+                        .overlay(Circle().stroke(isToday && !done ? Theme.ring : Theme.separator,
+                                                 lineWidth: isToday ? 2 : 1))
+                }
+            }
+            VStack(spacing: 2) {
+                Text(streak > 0 ? "\(streak) 日連続で付箋を貼っています" : "今日から連続記録を始めましょう")
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                Text("これまでの付箋 \(placedStickies.count) 枚").font(.caption).foregroundStyle(Theme.subInk)
+            }
+        }
+    }
+
+    /// 今日（まだなら昨日）までさかのぼって、付箋を貼った日が何日続いているか
+    private var streak: Int {
+        let calendar = Calendar.current
+        let days = Set(placedStickies.map { calendar.startOfDay(for: $0.createdAt) })
+        var day = calendar.startOfDay(for: .now)
+        if !days.contains(day) { day = calendar.date(byAdding: .day, value: -1, to: day)! }
+        var count = 0
+        while days.contains(day) {
+            count += 1
+            day = calendar.date(byAdding: .day, value: -1, to: day)!
+        }
+        return count
+    }
+
+    // MARK: - 読んでいる本（表紙の横並び。タップで切り替え）
+
+    private func readingBooks(_ current: Book) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(title: "読んでいる本", subtitle: "表紙をタップすると、撮る本を切り替えます")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .bottom, spacing: 16) {
+                    ForEach(books) { b in
+                        Button { withAnimation { lastBookId = b.id.uuidString } } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                BookCoverView(book: b)
+                                    .frame(width: 92, height: 136)
+                                    .overlay(alignment: .bottomTrailing) {
+                                        if b.id == current.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.title3)
+                                                .foregroundStyle(.white, Theme.ring)
+                                                .padding(5)
+                                        }
+                                    }
+                                Text(b.title)
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.ink)
+                                    .lineLimit(1)
+                                    .frame(width: 92, alignment: .leading)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button { showAddBook = true } label: {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Theme.card)
+                            .frame(width: 92, height: 136)
+                            .overlay(Image(systemName: "plus").font(.title2).foregroundStyle(Theme.subInk))
+                            .padding(.bottom, 22)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 8)
+            }
+            .scrollClipDisabled()
         }
     }
 
@@ -146,10 +230,12 @@ struct HomeView: View {
     private func recentNotes(_ book: Book) -> some View {
         let recent = book.stickies.filter(\.placed).sorted { $0.createdAt > $1.createdAt }.prefix(3)
         if !recent.isEmpty {
-            Text("最近の付箋").font(Theme.serif(.headline)).foregroundStyle(Theme.ink).padding(.top, 6)
-            ForEach(Array(recent)) { s in
-                Button { editing = s } label: { NoteCard(sticky: s) }
-                    .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(title: "最近の付箋")
+                ForEach(Array(recent)) { s in
+                    Button { editing = s } label: { NoteCard(sticky: s) }
+                        .buttonStyle(.plain)
+                }
             }
         }
     }
@@ -171,6 +257,28 @@ struct HomeView: View {
             }
             await MainActor.run { pickerItem = nil }
         }
+    }
+}
+
+/// 下が開いた円弧のリング（Apple Books の読書目標のような見た目）
+struct GoalRing<Content: View>: View {
+    let progress: Double
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .trim(from: 0, to: 0.75)
+                .stroke(Theme.card, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .rotationEffect(.degrees(135))
+            Circle()
+                .trim(from: 0, to: 0.75 * min(max(progress, 0), 1))
+                .stroke(Theme.ring, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .rotationEffect(.degrees(135))
+                .animation(.easeOut(duration: 0.6), value: progress)
+            content.offset(y: 8)
+        }
+        .padding(5)
     }
 }
 
@@ -215,6 +323,7 @@ struct PhotoReaderView: View {
                 let h = w * image.size.height / max(image.size.width, 1)
                 ZStack(alignment: .topLeading) {
                     Image(uiImage: image).resizable().frame(width: w, height: h)
+                        .overlay(Rectangle().stroke(Theme.separator))
 
                     if wholeLoaded {
                         ForEach(Array(wholeLines.enumerated()), id: \.element.id) { idx, line in

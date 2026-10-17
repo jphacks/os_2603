@@ -1,7 +1,9 @@
 import SwiftUI
 import SwiftData
 
-// 本の画面：表紙・書名・著者・紹介 ／「付箋」「本の情報」タブ ／ 右端に本の側面と付箋タブ。
+// 本の画面（Apple Books の本の詳細のような見た目）：
+// 上＝表紙の色の背景に大きな表紙・書名・著者、「パラパラ」「ページを撮る」
+// 下＝白い面に「復習」、本の側面（付箋の位置）、「付箋／本の情報」
 
 struct BookDetailView: View {
     @Environment(\.modelContext) private var context
@@ -29,36 +31,52 @@ struct BookDetailView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    header
-                    recallButtons
-                    tabBar
-                    switch tab {
-                    case .notes: notesList
-                    case .info: infoList
+                VStack(spacing: 0) {
+                    hero
+                    VStack(alignment: .leading, spacing: 22) {
+                        if !notes.isEmpty {
+                            reviewRow
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("付箋の位置").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                                BookEdgeView(stickies: notes, lastPage: lastPage) { sticky in
+                                    tab = .notes
+                                    withAnimation { proxy.scrollTo(sticky.id, anchor: .top) }
+                                }
+                            }
+                        }
+                        Picker("表示", selection: $tab) {
+                            Text("付箋 \(notes.count)").tag(DetailTab.notes)
+                            Text("本の情報").tag(DetailTab.info)
+                        }
+                        .pickerStyle(.segmented)
+                        switch tab {
+                        case .notes: notesList
+                        case .info: infoList
+                        }
                     }
-                }
-                .padding(.leading, 20)
-                .padding(.trailing, tab == .notes ? 40 : 20)
-                .padding(.vertical, 12)
-            }
-            .overlay(alignment: .trailing) {
-                if tab == .notes && !notes.isEmpty {
-                    BookEdgeView(stickies: notes, lastPage: lastPage) { sticky in
-                        withAnimation { proxy.scrollTo(sticky.id, anchor: .top) }
-                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.background,
+                                in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
                 }
             }
+            // 上に引っぱったときは表紙の色、下は白
+            .background(VStack(spacing: 0) { book.heroColor; Theme.background }.ignoresSafeArea())
         }
-        .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    lastBookId = book.id.uuidString
-                    appState.tab = .home
+                Menu {
+                    Button { takePhoto() } label: { Label("この本のページを撮る", systemImage: "camera") }
+                    Button(role: .destructive) { confirmDelete = true } label: {
+                        Label("この本を削除", systemImage: "trash")
+                    }
                 } label: {
-                    Label("この本のページを撮る", systemImage: "camera")
+                    Image(systemName: "ellipsis")
                 }
             }
         }
@@ -79,93 +97,134 @@ struct BookDetailView: View {
         }
     }
 
-    // MARK: - ヘッダー
+    // MARK: - 上（表紙の色の背景）
 
-    /// 本がなくても思い出す（パラパラ）・試験前に復習する
-    private var recallButtons: some View {
-        HStack(spacing: 10) {
-            Button { showFlip = true } label: {
-                Label("パラパラ", systemImage: "book").frame(maxWidth: .infinity)
-            }
-            Button { showReview = true } label: {
-                Label("復習", systemImage: "brain.head.profile").frame(maxWidth: .infinity)
-            }
-        }
-        .buttonStyle(CaptureButton(ghost: true))
-        .disabled(notes.isEmpty)
-    }
+    private var hero: some View {
+        VStack(spacing: 16) {
+            BookCoverView(book: book)
+                .frame(width: 168, height: 248)
+                .shadow(color: .black.opacity(0.35), radius: 14, y: 8)
+                .padding(.top, 12)
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 18) {
-            BookCoverView(book: book).frame(width: 96, height: 140)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(spacing: 6) {
                 Text(book.title)
-                    .font(Theme.serif(.title2))
-                    .foregroundStyle(Theme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.title2.bold())
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
                 if let author = book.author, !author.isEmpty {
-                    Text(author).font(.subheadline).foregroundStyle(Theme.subInk)
+                    Text(author)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
                 }
-                if let summary = book.summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.subInk)
-                        .lineSpacing(3)
-                        .lineLimit(4)
-                        .padding(.top, 6)
-                }
+                Text(statsLine)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.top, 2)
             }
+            .padding(.horizontal, 24)
+
+            actionCard
+                .padding(.horizontal, 20)
         }
-        .padding(.top, 8)
+        .padding(.bottom, 48)
+        .frame(maxWidth: .infinity)
+        // 上（ナビゲーションバーの下）まで表紙の色で塗る
+        .background(book.heroColor.padding(.top, -600))
+        // 白い面の角丸を、表紙の色の上に少し重ねる
+        .padding(.bottom, -24)
     }
 
-    private var tabBar: some View {
-        HStack(spacing: 32) {
-            tabButton("付箋 \(notes.count)", .notes)
-            tabButton("本の情報", .info)
-            Spacer()
+    private var statsLine: String {
+        var parts: [String] = []
+        if let publisher = book.publisher, !publisher.isEmpty { parts.append(publisher) }
+        if let pages = book.pageCount { parts.append("\(pages)ページ") }
+        if let first = notes.first?.pageNumber, let last = notes.last?.pageNumber {
+            parts.append(first == last ? "付箋 p.\(first)" : "付箋 p.\(first)〜p.\(last)")
         }
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.black.opacity(0.06)).frame(height: 1)
-        }
+        return parts.isEmpty ? "まだ付箋がありません" : parts.joined(separator: " ・ ")
     }
 
-    private func tabButton(_ title: String, _ value: DetailTab) -> some View {
-        Button { tab = value } label: {
-            VStack(spacing: 10) {
-                Text(title)
-                    .font(.body.weight(tab == value ? .semibold : .regular))
-                    .foregroundStyle(tab == value ? Theme.ink : Theme.subInk)
-                Rectangle()
-                    .fill(tab == value ? Theme.accent : .clear)
-                    .frame(height: 2.5)
+    /// 「ブック 344ページ ［サンプル］［¥620］」の位置にあたるカード
+    private var actionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("付箋 \(notes.count) 枚").font(.subheadline.weight(.semibold))
+                Text(lastStickyText).font(.caption).opacity(0.65)
             }
-            .fixedSize()
+            .foregroundStyle(.white)
+
+            HStack(spacing: 10) {
+                Button { showFlip = true } label: {
+                    Label("パラパラ", systemImage: "book.pages")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .foregroundStyle(.white)
+                        .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(notes.isEmpty)
+                .opacity(notes.isEmpty ? 0.5 : 1)
+
+                Button { takePhoto() } label: {
+                    Text("ページを撮る")
+                        .font(.subheadline.weight(.bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .foregroundStyle(Theme.ink)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var lastStickyText: String {
+        guard let latest = notes.map(\.createdAt).max() else { return "ページを撮って、貼りたい部分を囲みましょう" }
+        return "最後に貼った日 \(Theme.dateFormatter.string(from: latest))"
+    }
+
+    // MARK: - 下（白い面）
+
+    private var reviewRow: some View {
+        Button { showReview = true } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "brain.head.profile")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("付箋から復習する").font(.subheadline.weight(.semibold))
+                    Text("周りの文から、何の話だったか思い出す").font(.caption).foregroundStyle(Theme.subInk)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.subInk)
+            }
+            .foregroundStyle(Theme.ink)
         }
         .buttonStyle(.plain)
     }
-
-    // MARK: - 付箋
 
     @ViewBuilder
     private var notesList: some View {
         if notes.isEmpty {
             VStack(spacing: 12) {
-                Image(systemName: "tag").font(.largeTitle).foregroundStyle(Theme.subInk)
-                Text("まだ付箋がありません").font(Theme.serif(.headline))
-                Text("ホームでページを撮って、行をタップしてみましょう")
+                Image(systemName: "note.text").font(.largeTitle).foregroundStyle(Theme.subInk)
+                Text("まだ付箋がありません").font(.headline)
+                Text("ページを撮って、貼りたい部分を囲んでみましょう")
                     .font(.footnote).foregroundStyle(Theme.subInk)
-                Button("この本のページを撮る") {
-                    lastBookId = book.id.uuidString
-                    appState.tab = .home
-                }
-                .buttonStyle(.borderedProminent)
-                .padding(.top, 4)
+                Button("この本のページを撮る") { takePhoto() }
+                    .buttonStyle(CaptureButton())
+                    .padding(.top, 4)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 40)
+            .padding(.vertical, 32)
         } else {
-            LazyVStack(spacing: 16) {
+            LazyVStack(spacing: 12) {
                 ForEach(notes) { sticky in
                     Button { editing = sticky } label: { NoteCard(sticky: sticky) }
                         .buttonStyle(.plain)
@@ -175,10 +234,15 @@ struct BookDetailView: View {
         }
     }
 
-    // MARK: - 本の情報
-
     private var infoList: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
+            if let summary = book.summary, !summary.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("内容紹介").font(.headline)
+                    Text(summary).font(.subheadline).foregroundStyle(Theme.subInk).lineSpacing(3)
+                }
+            }
+
             VStack(spacing: 0) {
                 infoRow("タイトル", book.title)
                 infoRow("著者", book.author)
@@ -189,7 +253,7 @@ struct BookDetailView: View {
                 infoRow("登録日", Theme.dateFormatter.string(from: book.createdAt))
                 infoRow("付箋", "\(notes.count) 枚", last: true)
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
 
             if let isbn = book.isbn, BookInfoService.isValidISBN13(isbn) {
                 Button {
@@ -197,6 +261,8 @@ struct BookDetailView: View {
                 } label: {
                     Label(refreshing ? "取得中…" : "ISBNから本の情報を取り直す", systemImage: "arrow.clockwise")
                 }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.ring)
                 .disabled(refreshing)
                 if let refreshMessage {
                     Text(refreshMessage).font(.caption).foregroundStyle(Theme.subInk)
@@ -204,7 +270,8 @@ struct BookDetailView: View {
             }
 
             Button("この本を削除", role: .destructive) { confirmDelete = true }
-                .padding(.top, 8)
+                .font(.subheadline)
+                .padding(.top, 4)
         }
     }
 
@@ -221,9 +288,14 @@ struct BookDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
             if !last {
-                Rectangle().fill(Color.black.opacity(0.05)).frame(height: 1).padding(.leading, 16)
+                Rectangle().fill(Theme.separator).frame(height: 1).padding(.leading, 16)
             }
         }
+    }
+
+    private func takePhoto() {
+        lastBookId = book.id.uuidString
+        appState.tab = .home
     }
 
     private func refresh(isbn: String) async {

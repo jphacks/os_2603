@@ -14,7 +14,7 @@ struct CategoryLabel: View {
         HStack(spacing: 7) {
             Circle().fill(color.color).frame(width: 10, height: 10)
             Text(name.isEmpty ? color.defaultCategory : name)
-                .font(.subheadline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color.ink)
         }
     }
@@ -29,27 +29,42 @@ struct BookCoverView: View {
             if let data = book.coverData, let image = UIImage(data: data) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                ZStack {
-                    LinearGradient(colors: [placeholderColor.opacity(0.55), placeholderColor.opacity(0.9)],
+                ZStack(alignment: .topLeading) {
+                    LinearGradient(colors: [book.placeholderColor.opacity(0.75), book.placeholderColor],
                                    startPoint: .top, endPoint: .bottom)
                     Text(book.title)
-                        .font(Theme.serif(.caption))
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(Theme.ink.opacity(0.85))
-                        .padding(8)
-                        .minimumScaleFactor(0.6)
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .padding(10)
+                        .minimumScaleFactor(0.5)
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.08)))
-        .shadow(color: .black.opacity(0.18), radius: 4, x: 1, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.black.opacity(0.06)))
+        .shadow(color: .black.opacity(0.22), radius: 6, x: 0, y: 4)
+    }
+}
+
+extension Book {
+    /// 表紙がない本の仮の色（書名から決まる）
+    var placeholderColor: Color { Color(uiColor: placeholderUIColor) }
+
+    var placeholderUIColor: UIColor {
+        let palette: [UIColor] = [
+            UIColor(red: 0.85, green: 0.62, blue: 0.30, alpha: 1),
+            UIColor(red: 0.42, green: 0.62, blue: 0.86, alpha: 1),
+            UIColor(red: 0.40, green: 0.70, blue: 0.55, alpha: 1),
+            UIColor(red: 0.84, green: 0.45, blue: 0.40, alpha: 1),
+            UIColor(red: 0.55, green: 0.47, blue: 0.78, alpha: 1),
+        ]
+        let index = abs(title.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }) % palette.count
+        return palette[index]
     }
 
-    private var placeholderColor: Color {
-        let palette = StickyColor.allCases
-        let index = abs(book.title.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }) % palette.count
-        return palette[index].color
+    /// 本の画面の上の背景色（表紙の平均色を暗めに）
+    var heroColor: Color {
+        Color(uiColor: (CoverColor.average(of: coverData) ?? placeholderUIColor).darkened(0.45))
     }
 }
 
@@ -59,14 +74,12 @@ struct NoteCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
+            HStack(alignment: .firstTextBaseline) {
                 CategoryLabel(color: sticky.color)
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("p. \(sticky.pageNumber)").font(.subheadline)
-                    Text(Theme.dateFormatter.string(from: sticky.createdAt)).font(.caption)
-                }
-                .foregroundStyle(Theme.subInk)
+                Text("p.\(sticky.pageNumber) ・ \(Theme.dateFormatter.string(from: sticky.createdAt))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.subInk)
             }
 
             Text(markerText)
@@ -77,62 +90,61 @@ struct NoteCard: View {
             if sticky.memo.isEmpty {
                 Text("タップしてメモを追加")
                     .font(.footnote)
-                    .foregroundStyle(Theme.subInk.opacity(0.6))
+                    .foregroundStyle(Theme.subInk.opacity(0.7))
             } else {
                 Text(sticky.memo)
-                    .font(Theme.serif(.subheadline))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.subInk)
-                    .lineSpacing(5)
+                    .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(20)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    /// 行ごとに蛍光ペンを引いたように見せる
+    /// 行に蛍光ペンを引いたように見せる
     private var markerText: AttributedString {
-        var text = AttributedString("「\(sticky.marker)」")
+        var text = AttributedString(sticky.marker)
         text.foregroundColor = Theme.ink
         text.backgroundColor = sticky.color.color.opacity(0.35)
         return text
     }
 }
 
-/// 本の側面。付箋の色タブがページの位置に並ぶ（B2: 側面から位置が分かる）
+/// 本の側面（横向き）。付箋の色タブがページの位置に並ぶ（B2: 側面から位置が分かる）
 struct BookEdgeView: View {
     let stickies: [Sticky]
     let lastPage: Int
     var onTap: (Sticky) -> Void
 
-    private let edgeWidth: CGFloat = 12
-    private let tabWidth: CGFloat = 20
-    private let tabHeight: CGFloat = 40
-
     var body: some View {
-        GeometryReader { geo in
-            let usable = max(geo.size.height - tabHeight - 40, 1)
-            ZStack(alignment: .topTrailing) {
-                pageEdge
-                    .frame(width: edgeWidth)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-
-                ForEach(firstStickyPerPage, id: \.id) { sticky in
-                    let fraction = CGFloat(sticky.pageNumber) / CGFloat(max(lastPage, 1))
-                    UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 4)
-                        .fill(sticky.color.color)
-                        .frame(width: tabWidth, height: tabHeight)
-                        .shadow(color: .black.opacity(0.15), radius: 2, x: -1, y: 1)
-                        .position(x: geo.size.width - tabWidth / 2 - edgeWidth + 6,
-                                  y: 20 + tabHeight / 2 + min(fraction, 1) * usable)
-                        .onTapGesture { onTap(sticky) }
-                        .accessibilityLabel("p.\(sticky.pageNumber) の付箋へ")
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    pageEdge.frame(height: 14).offset(y: 9)
+                    ForEach(firstStickyPerPage, id: \.id) { sticky in
+                        let fraction = min(CGFloat(sticky.pageNumber) / CGFloat(max(lastPage, 1)), 1)
+                        UnevenRoundedRectangle(topLeadingRadius: 3, topTrailingRadius: 3)
+                            .fill(sticky.color.color)
+                            .frame(width: 14, height: 18)
+                            .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+                            .position(x: 7 + fraction * (geo.size.width - 14), y: 6)
+                            .onTapGesture { onTap(sticky) }
+                            .accessibilityLabel("p.\(sticky.pageNumber) の付箋へ")
+                    }
                 }
             }
+            .frame(height: 24)
+            HStack {
+                Text("p.1")
+                Spacer()
+                Text("p.\(lastPage)")
+            }
+            .font(.caption2)
+            .foregroundStyle(Theme.subInk)
         }
-        .frame(width: edgeWidth + tabWidth)
     }
 
     private var firstStickyPerPage: [Sticky] {
@@ -142,14 +154,14 @@ struct BookEdgeView: View {
 
     private var pageEdge: some View {
         Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Theme.edge))
-            var x: CGFloat = 1
-            while x < size.width {
-                context.fill(Path(CGRect(x: x, y: 0, width: 0.6, height: size.height)),
-                             with: .color(.white.opacity(0.35)))
-                x += 2.2
+            context.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 2),
+                         with: .color(Theme.edge))
+            var y: CGFloat = 1.5
+            while y < size.height {
+                context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 0.6)),
+                             with: .color(.white.opacity(0.5)))
+                y += 2.2
             }
         }
-        .shadow(color: .black.opacity(0.12), radius: 3, x: -2)
     }
 }

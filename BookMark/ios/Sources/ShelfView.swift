@@ -1,45 +1,40 @@
 import SwiftUI
 import SwiftData
 
-// 本：登録した本の一覧（表紙つき）
+// ライブラリ：登録した本を表紙で並べる（Apple Books のライブラリのような 2 列）
 
 struct ShelfView: View {
     @Query(sort: \Book.createdAt, order: .reverse) private var books: [Book]
     @State private var showAdd = false
     @State private var path: [Book] = []
 
-    private let columns = [GridItem(.flexible(), spacing: 18),
-                           GridItem(.flexible(), spacing: 18),
-                           GridItem(.flexible(), spacing: 18)]
+    private let columns = [GridItem(.flexible(), spacing: 22, alignment: .bottom),
+                           GridItem(.flexible(), spacing: 22, alignment: .bottom)]
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
-                    ForEach(books) { book in
-                        NavigationLink(value: book) { BookCell(book: book) }
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Text("すべての本").font(.headline).foregroundStyle(Theme.ink)
+                        Spacer()
+                        Text("\(books.count) 冊").font(.subheadline).foregroundStyle(Theme.subInk)
+                    }
+                    Divider()
+                    LazyVGrid(columns: columns, spacing: 30) {
+                        ForEach(books) { book in
+                            NavigationLink(value: book) { BookCell(book: book) }
+                                .buttonStyle(.plain)
+                        }
+                        Button { showAdd = true } label: { addCell }
                             .buttonStyle(.plain)
                     }
-                    Button { showAdd = true } label: {
-                        Color.clear
-                            .aspectRatio(2 / 3, contentMode: .fit)
-                            .overlay {
-                                VStack(spacing: 6) {
-                                    Image(systemName: "plus").font(.title2)
-                                    Text("本を登録").font(.caption)
-                                }
-                                .foregroundStyle(Theme.subInk)
-                            }
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6]))
-                                    .foregroundStyle(Theme.subInk.opacity(0.5)))
-                    }
                 }
-                .padding(20)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 8)
             }
             .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("本")
+            .navigationTitle("ライブラリ")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAdd = true } label: {
@@ -53,10 +48,29 @@ struct ShelfView: View {
             }
         }
     }
+
+    private var addCell: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Theme.card)
+                .aspectRatio(2 / 3, contentMode: .fit)
+                .overlay {
+                    VStack(spacing: 6) {
+                        Image(systemName: "barcode.viewfinder").font(.title)
+                        Text("本を登録").font(.footnote.weight(.semibold))
+                    }
+                    .foregroundStyle(Theme.subInk)
+                }
+            Text(" ").font(.footnote)
+            Text(" ").font(.caption)
+        }
+    }
 }
 
 private struct BookCell: View {
     let book: Book
+
+    private var count: Int { book.stickies.filter(\.placed).count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -65,12 +79,16 @@ private struct BookCell: View {
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .topTrailing) { stickyTabs }
             Text(book.title)
-                .font(Theme.serif(.footnote))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(Theme.ink)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            Text("付箋 \(book.stickies.filter(\.placed).count)")
-                .font(.caption2).foregroundStyle(Theme.subInk)
+                .lineLimit(1)
+            HStack {
+                Text(count == 0 ? "付箋なし" : "付箋 \(count) 枚")
+                Spacer()
+                Image(systemName: "ellipsis")
+            }
+            .font(.caption)
+            .foregroundStyle(Theme.subInk)
         }
     }
 
@@ -81,10 +99,10 @@ private struct BookCell: View {
             ForEach(colors, id: \.self) { c in
                 UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
                     .fill(c.color)
-                    .frame(width: 8, height: 12)
+                    .frame(width: 9, height: 14)
             }
         }
-        .offset(x: -6, y: -8)
+        .offset(x: -8, y: -10)
     }
 }
 

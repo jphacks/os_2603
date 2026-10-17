@@ -12,15 +12,17 @@ struct ReviewView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.969, green: 0.957, blue: 0.925).ignoresSafeArea()
+            Theme.background.ignoresSafeArea()
             VStack {
                 HStack {
-                    Button("閉じる") { onClose() }
-                        .font(.subheadline).bold()
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(Color.black)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    Button { onClose() } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 36, height: 36)
+                            .background(Theme.card, in: Circle())
+                    }
+                    .accessibilityLabel("閉じる")
                     Spacer()
                     if !deck.isEmpty {
                         Text("\(min(index + 1, deck.count)) / \(deck.count)")
@@ -50,7 +52,7 @@ struct ReviewView: View {
                 Button("もう一度") {
                     deck = stickies.shuffled(); index = 0; showAnswer = false
                 }
-                .buttonStyle(.borderedProminent).tint(.black)
+                .buttonStyle(CaptureButton())
             }
         } else {
             card(deck[index])
@@ -75,7 +77,7 @@ struct ReviewView: View {
                     Text(after).foregroundStyle(.primary)
                 }
             }
-            .font(.body).lineSpacing(4)
+            .font(Theme.serif(.body)).lineSpacing(6)
 
             if showAnswer {
                 Divider().padding(.vertical, 2)
@@ -88,15 +90,13 @@ struct ReviewView: View {
                 if showAnswer { showAnswer = false; index += 1 }
                 else { showAnswer = true }
             }
-            .buttonStyle(.borderedProminent).tint(.black)
+            .buttonStyle(CaptureButton())
             .frame(maxWidth: .infinity)
             .padding(.top, 6)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 1, green: 0.992, blue: 0.973))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.black.opacity(0.08)))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18))
         .padding(.horizontal, 16)
     }
 }

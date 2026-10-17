@@ -1,7 +1,7 @@
 import SwiftUI
 
 // パラパラモード（B3）: 本が無くても、付箋のあるページを順にめくり、
-// 周辺の文章で「この話だった」と思い出す。
+// 周辺の文章で「この話だった」と思い出す。見た目は本を読む画面のように白いページ。
 struct FlipView: View {
     let stickies: [Sticky]   // 配置済み・ページ順
     let bookTitle: String
@@ -10,90 +10,105 @@ struct FlipView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.11, green: 0.102, blue: 0.086).ignoresSafeArea()
+            Theme.background.ignoresSafeArea()
             VStack(spacing: 0) {
-                HStack {
-                    Button("閉じる") { onClose() }
-                        .font(.subheadline).bold()
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(.white.opacity(0.15))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    Spacer()
-                    if !stickies.isEmpty {
-                        Text("\(index + 1) / \(stickies.count) ・ \(bookTitle)")
-                            .font(.footnote)
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(1)
+                HStack(spacing: 12) {
+                    Button { onClose() } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 36, height: 36)
+                            .background(Theme.card, in: Circle())
                     }
+                    .accessibilityLabel("閉じる")
+                    Spacer()
+                    Text(bookTitle)
+                        .font(.caption)
+                        .foregroundStyle(Theme.subInk)
+                        .lineLimit(1)
+                    Spacer()
+                    Color.clear.frame(width: 36, height: 36)
                 }
-                .padding(.horizontal, 18).padding(.top, 12)
+                .padding(.horizontal, 18).padding(.top, 8)
 
                 if stickies.isEmpty {
                     Spacer()
                     VStack(spacing: 10) {
-                        Text("🪶").font(.system(size: 40))
-                        Text("まだ付箋がありません")
-                            .foregroundStyle(.white.opacity(0.7))
+                        Image(systemName: "book.pages").font(.largeTitle).foregroundStyle(Theme.subInk)
+                        Text("まだ付箋がありません").foregroundStyle(Theme.subInk)
                     }
                     Spacer()
                 } else {
                     TabView(selection: $index) {
                         ForEach(Array(stickies.enumerated()), id: \.element.id) { i, s in
-                            FlipCard(sticky: s).tag(i)
+                            FlipPage(sticky: s).tag(i)
                         }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .always))
-                    .indexViewStyle(.page(backgroundDisplayMode: .always))
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+
+                    Text("\(index + 1) / \(stickies.count)")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(Theme.subInk)
+                        .padding(.bottom, 10)
                 }
             }
         }
     }
 }
 
-private struct FlipCard: View {
+private struct FlipPage: View {
     let sticky: Sticky
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("p.\(sticky.pageNumber)")
-                    .font(.subheadline).bold()
-                    .foregroundStyle(.white.opacity(0.6))
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    CategoryLabel(color: sticky.color)
+                    Spacer()
+                    Text("p.\(sticky.pageNumber)").font(.footnote).foregroundStyle(Theme.subInk)
+                }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(sticky.clipBefore, id: \.self) {
-                        Text($0).foregroundStyle(.white.opacity(0.75))
+                // 本のページのように、周りの文と付箋の行を続けて組む
+                Text(pageText)
+                    .font(Theme.serif(.title3))
+                    .lineSpacing(10)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(sticky.heading).font(.headline).foregroundStyle(Theme.ink)
+                    if !sticky.memo.isEmpty {
+                        Text(sticky.memo)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.ink)
+                            .lineSpacing(4)
                     }
-                    Text(sticky.marker)
-                        .bold().foregroundStyle(.white)
-                        .padding(.bottom, 3)
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(sticky.color.color).frame(height: 3)
-                        }
-                    ForEach(sticky.clipAfter, id: \.self) {
-                        Text($0).foregroundStyle(.white.opacity(0.75))
-                    }
                 }
-                .font(.body)
-                .lineSpacing(6)
-
-                HStack(spacing: 10) {
-                    Circle().fill(sticky.color.color).frame(width: 14, height: 14)
-                    Text(sticky.heading).font(.title3).bold().foregroundStyle(.white)
-                }
-                .padding(.top, 8)
-
-                if !sticky.memo.isEmpty {
-                    Text(sticky.memo)
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(sticky.color.color.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
             }
-            .padding(24)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var pageText: AttributedString {
+        var result = AttributedString()
+        for line in sticky.clipBefore {
+            var t = AttributedString(line + "\n")
+            t.foregroundColor = Theme.subInk
+            result += t
+        }
+        var marker = AttributedString(sticky.marker)
+        marker.foregroundColor = Theme.ink
+        marker.backgroundColor = sticky.color.color.opacity(0.4)
+        result += marker
+        for line in sticky.clipAfter {
+            var t = AttributedString("\n" + line)
+            t.foregroundColor = Theme.subInk
+            result += t
+        }
+        return result
     }
 }
