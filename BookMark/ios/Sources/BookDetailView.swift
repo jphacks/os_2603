@@ -111,9 +111,10 @@ struct BookDetailView: View {
     }
 
     // 撮影/選択した画像を開く。ページ番号は前回の値を初期値に（開いてから付箋までを短く）。
+    // カメラ写真は回転情報を持つため、正立に焼き込んでから使う（囲んだ範囲=OCR範囲のズレ防止）。
     private func setPhoto(_ image: UIImage) {
         pageNumber = AppStore.lastPage(for: book.id)
-        photo = image
+        photo = uprightImage(image)
     }
 
     private func loadPicked(_ item: PhotosPickerItem?) {
@@ -235,7 +236,8 @@ struct PhotoReaderView: View {
 
             Text(pageNumber == nil
                  ? "ページ番号を入れてから、貼りたい部分を囲んでください"
-                 : "貼りたい部分を指でなぞって囲む（行をタップでも可）")
+                 : wholeLoaded ? "貼りたい部分を指でなぞって囲む（行タップでも可）"
+                               : "貼りたい部分を指でなぞって囲むと付箋ができます")
                 .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
             if let message {
@@ -493,6 +495,17 @@ struct CaptureButton: ButtonStyle {
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.black.opacity(ghost ? 0.12 : 0)))
             .opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
+// 回転情報を画素に焼き込み、orientation を .up にそろえた画像を返す。
+func uprightImage(_ image: UIImage) -> UIImage {
+    guard image.imageOrientation != .up else { return image }
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = image.scale
+    let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+    return renderer.image { _ in
+        image.draw(in: CGRect(origin: .zero, size: image.size))
     }
 }
 
