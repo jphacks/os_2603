@@ -55,6 +55,8 @@ final class Sticky {
     var importance: Int
     var order: Double
     var createdAt: Date
+    // 暗号化されたメモ本文。平文の memo は編集後に空になる。
+    var encryptedMemo: Data?
     // 覚えたフラグ（剥がして捨てた = mastered）。データは消さない。
     var mastered: Bool
     var masteredAt: Date?

@@ -127,9 +127,15 @@ private struct ReviewCard: View {
     @Binding var showAnswer: Bool
     var onNext: () -> Void
     var onPeelTapped: () -> Void
+    @Environment(VaultManager.self) private var vault
 
     @State private var aiQuestion: String?
     @State private var loadingQuestion = false
+
+    private var displayMemo: String {
+        if let data = sticky.encryptedMemo { return vault.decrypt(data) ?? "" }
+        return sticky.memo
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -141,8 +147,8 @@ private struct ReviewCard: View {
             if showAnswer {
                 Divider().padding(.vertical, 2)
                 Text(sticky.heading).font(.headline)
-                if !sticky.memo.isEmpty {
-                    Text(sticky.memo).foregroundStyle(.secondary)
+                if !displayMemo.isEmpty {
+                    Text(displayMemo).foregroundStyle(.secondary)
                 }
             }
 
@@ -201,7 +207,7 @@ private struct ReviewCard: View {
         aiQuestion = await AIHelper.generateQuestion(
             marker: sticky.marker,
             heading: sticky.heading,
-            memo: sticky.memo,
+            memo: displayMemo,
             clipBefore: sticky.clipBefore,
             clipAfter: sticky.clipAfter)
         loadingQuestion = false

@@ -665,6 +665,13 @@ struct PhotoReaderView: View {
 
 struct StickyRow: View {
     let sticky: Sticky
+    @Environment(VaultManager.self) private var vault
+
+    private var displayMemo: String {
+        if let data = sticky.encryptedMemo { return vault.decrypt(data) ?? "" }
+        return sticky.memo
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             RoundedRectangle(cornerRadius: 2).fill(sticky.color.color).frame(width: 5)
@@ -683,8 +690,8 @@ struct StickyRow: View {
                     .padding(.horizontal, 2)
                     .background(sticky.color.color.opacity(0.35))
                     .lineLimit(2)
-                if !sticky.memo.isEmpty {
-                    Text("📝 \(sticky.memo)").font(.caption).foregroundStyle(BooksStyle.subInk)
+                if !displayMemo.isEmpty {
+                    Text("📝 \(displayMemo)").font(.caption).foregroundStyle(BooksStyle.subInk)
                 }
             }
         }
@@ -700,7 +707,10 @@ struct StickyRow: View {
 struct StickyEditor: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @Environment(VaultManager.self) private var vault
     @Bindable var sticky: Sticky
+    @State private var memoText: String = ""
+    @State private var encryptTask: Task<Void, Never>?
     @State private var summarizing = false
     @State private var summaryMessage: String?
 
@@ -741,11 +751,19 @@ struct StickyEditor: View {
                     }
                 }
                 Section("メモ") {
-                    TextField("気づいたこと・覚えたいこと", text: $sticky.memo, axis: .vertical)
+                    TextField("気づいたこと・覚えたいこと", text: $memoText, axis: .vertical)
                         .lineLimit(3...6)
-                        .onChange(of: sticky.memo) { _, v in
+                        .onChange(of: memoText) { _, v in
                             sticky.heading = Sticky.makeHeading(memo: v, marker: sticky.marker)
+                            encryptTask?.cancel()
+                            encryptTask = Task {
+                                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒待つ
+                                guard !Task.isCancelled else { return }
+                                sticky.encryptedMemo = vault.encrypt(v)
+                                sticky.memo = ""
+                            }
                         }
+
                 }
                 Section("色") {
                     HStack(spacing: 12) {
@@ -765,6 +783,13 @@ struct StickyEditor: View {
                     Button("削除", role: .destructive) {
                         context.delete(sticky); dismiss()
                     }
+                }
+            }
+            .onAppear {
+                if let data = sticky.encryptedMemo {
+                    memoText = vault.decrypt(data) ?? sticky.memo
+                } else {
+                    memoText = sticky.memo
                 }
             }
             .task(id: sticky.id) {
