@@ -7,7 +7,8 @@ struct BookDetailView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
-    @AppStorage("homeBookID") private var homeBookID = ""
+    // AppStore.lastBookId と同じキー（ホームはこの本から始まる）
+    @AppStorage("bookmark.lastBookId") private var lastBookId = ""
     @Bindable var book: Book
 
     @State private var tab: DetailTab = .notes
@@ -15,6 +16,8 @@ struct BookDetailView: View {
     @State private var confirmDelete = false
     @State private var refreshing = false
     @State private var refreshMessage: String?
+    @State private var showFlip = false
+    @State private var showReview = false
 
     enum DetailTab { case notes, info }
 
@@ -28,6 +31,7 @@ struct BookDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     header
+                    recallButtons
                     tabBar
                     switch tab {
                     case .notes: notesList
@@ -51,7 +55,7 @@ struct BookDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    homeBookID = book.id.uuidString
+                    lastBookId = book.id.uuidString
                     appState.tab = .home
                 } label: {
                     Label("この本のページを撮る", systemImage: "camera")
@@ -59,6 +63,13 @@ struct BookDetailView: View {
             }
         }
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
+        .fullScreenCover(isPresented: $showFlip) {
+            FlipView(stickies: notes, bookTitle: book.title) { showFlip = false }
+        }
+        .fullScreenCover(isPresented: $showReview) {
+            ReviewView(stickies: notes) { showReview = false }
+        }
+        .onAppear { lastBookId = book.id.uuidString }
         .confirmationDialog("「\(book.title)」と付箋をすべて削除しますか？",
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("削除する", role: .destructive) {
@@ -69,6 +80,20 @@ struct BookDetailView: View {
     }
 
     // MARK: - ヘッダー
+
+    /// 本がなくても思い出す（パラパラ）・試験前に復習する
+    private var recallButtons: some View {
+        HStack(spacing: 10) {
+            Button { showFlip = true } label: {
+                Label("パラパラ", systemImage: "book").frame(maxWidth: .infinity)
+            }
+            Button { showReview = true } label: {
+                Label("復習", systemImage: "brain.head.profile").frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(CaptureButton(ghost: true))
+        .disabled(notes.isEmpty)
+    }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 18) {
@@ -131,7 +156,7 @@ struct BookDetailView: View {
                 Text("ホームでページを撮って、行をタップしてみましょう")
                     .font(.footnote).foregroundStyle(Theme.subInk)
                 Button("この本のページを撮る") {
-                    homeBookID = book.id.uuidString
+                    lastBookId = book.id.uuidString
                     appState.tab = .home
                 }
                 .buttonStyle(.borderedProminent)

@@ -16,6 +16,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.Manasuta.BookMark
+        DEVELOPMENT_TEAM: AY4LS6AZR8
+        CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: "YES"
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"

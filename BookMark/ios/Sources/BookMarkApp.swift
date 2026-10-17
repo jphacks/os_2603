@@ -25,6 +25,7 @@ struct BookMarkApp: App {
     var body: some Scene {
         WindowGroup {
             RootTabView()
+                .preferredColorScheme(.light)   // 明るい紙デザイン固定（ダークモードで文字が消えるのを防ぐ）
         }
         .modelContainer(container)
     }

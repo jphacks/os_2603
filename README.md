@@ -76,14 +76,14 @@
 ### 独自技術
 #### ハッカソンで開発した独自機能・技術
 * **目印のあいまい一致による付箋の自動復元**：行の文字列の類似度（Levenshtein）で、再撮影時にOCRがずれても付箋を元の行へ戻す。
-  * ネイティブ: [`BookMark/ios/Sources/Matching.swift`](./BookMark/ios/Sources/Matching.swift) ／ Web: [`BookMark/src/matching.ts`](./BookMark/src/matching.ts)
+  * ネイティブ: [`BookMark/ios/Sources/Matching.swift`](./BookMark/ios/Sources/Matching.swift) ／ Web: [`BookMark/ios/Sources/Matching.swift`](./BookMark/ios/Sources/Matching.swift)
 * **画像を保存しない付箋モデル**（本・ページ番号・目印・メモ・周辺の切り抜きだけを保存）。
-  * [`BookMark/ios/Sources/Models.swift`](./BookMark/ios/Sources/Models.swift) ／ [`BookMark/src/types.ts`](./BookMark/src/types.ts)
+  * [`BookMark/ios/Sources/Models.swift`](./BookMark/ios/Sources/Models.swift) ／ [`BookMark/ios/Sources/Models.swift`](./BookMark/ios/Sources/Models.swift)
 * **端末内 Apple Vision での日本語OCR＋ページ番号自動検出**、写真上に行オーバーレイして付箋を配置。
   * [`BookMark/ios/Sources/OCR.swift`](./BookMark/ios/Sources/OCR.swift) ／ [`BookMark/ios/Sources/BookDetailView.swift`](./BookMark/ios/Sources/BookDetailView.swift)
 * **パラパラモード（B3）**：本がなくても周辺文で思い出す（Web試作で体験を実装、ネイティブは実装予定）。
-  * [`BookMark/src/FlipMode.tsx`](./BookMark/src/FlipMode.tsx)
+  * [`BookMark/ios/Sources/FlipView.swift`](./BookMark/ios/Sources/FlipView.swift)
 * **写真なしクイックメモ（A5）**：先にメモだけ残し、後で撮影したページの行へ配置。
-  * [`BookMark/src/store.ts`](./BookMark/src/store.ts) ／ [`BookMark/src/App.tsx`](./BookMark/src/App.tsx)
+  * [`BookMark/ios/Sources/Store.swift`](./BookMark/ios/Sources/Store.swift) ／ [`BookMark/ios/Sources/BookDetailView.swift`](./BookMark/ios/Sources/BookDetailView.swift)
 
 > ソース一式は [`BookMark/`](./BookMark) を参照（Web試作＝ルート、iPhoneネイティブ＝ [`BookMark/ios/`](./BookMark/ios)）。

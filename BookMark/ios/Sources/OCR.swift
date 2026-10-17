@@ -16,7 +16,12 @@ struct OCRResult {
 }
 
 enum OCR {
-    static func recognize(_ image: UIImage) async -> OCRResult {
+    /// `regionOfInterest` は左上原点の正規化矩形。指定するとその範囲だけOCRする
+    /// （プライバシー・速度のため、ページ全体は原則読まない）。
+    static func recognize(
+        _ image: UIImage,
+        regionOfInterest roi: CGRect? = nil
+    ) async -> OCRResult {
         guard let cg = image.cgImage else {
             return OCRResult(lines: [], pageNumber: nil)
         }
@@ -43,6 +48,14 @@ enum OCR {
             request.recognitionLanguages = ["ja-JP", "en-US"]
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
+            if let roi {
+                // Vision は左下原点なので上下を反転。[0,1]にクランプ。
+                let y = max(0, min(1, 1 - roi.maxY))
+                let h = max(0, min(1 - y, roi.height))
+                let x = max(0, min(1, roi.minX))
+                let w = max(0, min(1 - x, roi.width))
+                request.regionOfInterest = CGRect(x: x, y: y, width: w, height: h)
+            }
 
             let handler = VNImageRequestHandler(
                 cgImage: cg, orientation: orientation, options: [:])
