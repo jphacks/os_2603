@@ -261,6 +261,10 @@ struct PhotoReaderView: View {
     @State private var dragStart: CGPoint?
     @State private var dragEnd: CGPoint?
     @State private var busy = false
+    @State private var recognitionTask: Task<Void, Never>?
+    @State private var recognitionID: UUID?
+    @State private var pendingRect: CGRect?
+    @State private var previewTask: Task<Void, Never>?
     @State private var flash: CGRect?
     @State private var ocrPreview: (rect: CGRect, text: String)? // 選択領域に認識結果を表示
     @State private var message: String?
@@ -320,6 +324,16 @@ struct PhotoReaderView: View {
                book.stickies.contains(where: { $0.placed && !$0.mastered && $0.pageNumber == pn }) {
                 loadWholePage()
             }
+        }
+        .onDisappear {
+            previewTask?.cancel()
+            ocrPreview = nil
+            flash = nil
+            recognitionTask?.cancel()
+            recognitionTask = nil
+            recognitionID = nil
+            pendingRect = nil
+            busy = false
         }
         .onChange(of: wholeLines.count) { _, _ in updateCachedAnchors() }
         .onChange(of: book.stickies.count) { _, _ in updateCachedAnchors() }
@@ -447,6 +461,15 @@ struct PhotoReaderView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
 
+            // OCR 完了まで選択範囲を残し、受付を即座に伝える。
+            if let pending = pendingRect {
+                Rectangle().fill(Color.yellow.opacity(0.25))
+                    .overlay(Rectangle().strokeBorder(Color.yellow, lineWidth: 2))
+                    .frame(width: pending.width * w, height: pending.height * h)
+                    .position(x: pending.midX * w, y: pending.midY * h)
+                    .allowsHitTesting(false)
+            }
+
             // 付箋作成フラッシュ
             if let f = flash {
                 Rectangle().fill(Color.yellow.opacity(0.4))
@@ -470,7 +493,7 @@ struct PhotoReaderView: View {
         .gesture(
             DragGesture(minimumDistance: 10)
                 .onChanged { v in
-                    if isPinching { return }
+                    if isPinching || busy { return }
                     if zoomScale > 1.05 {
                         panOffset = CGSize(
                             width: lastPanOffset.width + v.translation.width,
@@ -538,56 +561,66 @@ struct PhotoReaderView: View {
     // MARK: - ドラッグ完了 → 範囲 OCR
 
     private func finishDrag(start: CGPoint, end: CGPoint, w: CGFloat, h: CGFloat) {
+        guard !busy, w > 0, h > 0 else { return }
         let vx = min(start.x, end.x), vy = min(start.y, end.y)
         let vw = abs(end.x - start.x), vh = abs(end.y - start.y)
         guard vw > 12, vh > 8 else { return }
         guard let pn = pageNumber else { show("ページ番号を入れてください"); return }
         let rect = CGRect(x: vx/w, y: vy/h, width: vw/w, height: vh/h)
 
-        busy = true; message = nil
-        Task {
-            let pad = max(0.03, Double(rect.height) * 0.9)
-            let expanded = CGRect(
-                x: max(0, rect.minX - 0.02),
-                y: max(0, rect.minY - pad),
-                width: min(1, rect.width + 0.04),
-                height: min(1, rect.height + pad * 2))
-            let lines = await OCR.recognize(image, regionOfInterest: expanded).lines
+        message = nil
+        previewTask?.cancel()
+        ocrPreview = nil
+        flash = nil
+        haptic.impactOccurred()
+        let expanded = OCRSelection.expandedRegion(for: rect)
+        if wholeLoaded, let selection = OCRSelection.extract(from: wholeLines, in: rect, requireWholeLines: true) {
+            completeSelection(selection, page: pn, rect: rect)
+            return
+        }
 
-            func centerY(_ l: OCRLine) -> CGFloat { l.rect.midY }
-            let sel    = lines.filter { centerY($0) >= rect.minY && centerY($0) <= rect.maxY }
-            let before = lines.filter { centerY($0) < rect.minY }
-            let after  = lines.filter { centerY($0) > rect.maxY }
-
-            let markerLines = sel.isEmpty ? lines : sel
-            let marker = markerLines.map { $0.text }.joined()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            await MainActor.run {
-                busy = false
-                guard !marker.isEmpty else { show("文字が読み取れませんでした"); return }
-                let clipBefore = before.suffix(2).map { $0.text }
-                let clipAfter  = after.prefix(2).map { $0.text }
-                createSticky(pageNumber: pn, marker: marker,
-                             clipBefore: clipBefore, clipAfter: Array(clipAfter))
-                // 選択範囲に認識テキストを一時表示
-                withAnimation(.easeOut(duration: 0.15)) {
-                    ocrPreview = (rect: rect, text: marker)
-                }
-                flashRect(rect)
-                Task {
-                    try? await Task.sleep(nanoseconds: 2_200_000_000)
-                    await MainActor.run {
-                        withAnimation { ocrPreview = nil }
-                    }
-                }
+        pendingRect = rect
+        busy = true
+        let requestID = UUID()
+        recognitionID = requestID
+        recognitionTask = Task { @MainActor in
+            let result = await OCR.recognize(image, regionOfInterest: expanded)
+            guard !Task.isCancelled, recognitionID == requestID else { return }
+            busy = false
+            pendingRect = nil
+            recognitionTask = nil
+            recognitionID = nil
+            // ページ入力が変わった場合、以前のページへの誤登録を避ける。
+            guard pageNumber == pn else { return }
+            guard let selection = OCRSelection.extract(from: result.lines, in: rect) else {
+                show("文字が読み取れませんでした"); return
             }
+            completeSelection(selection, page: pn, rect: rect)
+        }
+    }
+
+    private func completeSelection(_ selection: OCRSelection, page: Int, rect: CGRect) {
+        createSticky(pageNumber: page, marker: selection.marker,
+                     clipBefore: selection.before, clipAfter: selection.after,
+                     feedback: false)
+        withAnimation(.easeOut(duration: 0.15)) {
+            ocrPreview = (rect: rect, text: selection.marker)
+        }
+        flash = rect
+        previewTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 650_000_000)
+                flash = nil
+                try await Task.sleep(nanoseconds: 1_550_000_000)
+                withAnimation { ocrPreview = nil }
+            } catch { return }
         }
     }
 
     // MARK: - 行タップ
 
     private func tapLine(_ i: Int) {
+        guard !busy, wholeLines.indices.contains(i) else { return }
         if let s = cachedAnchors[i] { onEdit(s); return }
         guard let pn = pageNumber else { show("ページ番号を入れてください"); return }
         let texts = wholeLines.map { $0.text }
@@ -598,39 +631,35 @@ struct PhotoReaderView: View {
     }
 
     private func createSticky(pageNumber pn: Int, marker: String,
-                               clipBefore: [String], clipAfter: [String]) {
+                               clipBefore: [String], clipAfter: [String], feedback: Bool = true) {
         let color = StickyColor.cycle(book.stickies.count)
         let sticky = Sticky(
             pageNumber: pn, placed: true, marker: marker,
             clipBefore: clipBefore, clipAfter: clipAfter, color: color, book: book)
         context.insert(sticky)
         AppStore.setLastPage(pn, for: book.id)
-        haptic.impactOccurred()
+        if feedback { haptic.impactOccurred() }
         AIHelper.improveHeading(for: sticky)  // AI が使えれば非同期で見出しを更新
     }
 
     private func loadWholePage() {
-        guard !wholeLoaded else { return }
+        guard !wholeLoaded, !busy else { return }
         busy = true
-        Task {
+        let requestID = UUID()
+        recognitionID = requestID
+        recognitionTask = Task { @MainActor in
             let result = await OCR.recognize(image)
-            await MainActor.run {
-                wholeLines = result.lines
-                wholeLoaded = true
-                if pageNumber == nil, let pn = result.pageNumber {
-                    pageNumber = pn; pageText = String(pn)
-                }
-                busy = false
-                updateCachedAnchors()
+            guard !Task.isCancelled, recognitionID == requestID else { return }
+            recognitionTask = nil
+            recognitionID = nil
+            wholeLines = result.lines
+            wholeLoaded = !result.lines.isEmpty
+            if pageNumber == nil, let pn = result.pageNumber {
+                pageNumber = pn; pageText = String(pn)
             }
-        }
-    }
-
-    private func flashRect(_ rect: CGRect) {
-        flash = rect
-        Task {
-            try? await Task.sleep(nanoseconds: 650_000_000)
-            await MainActor.run { flash = nil }
+            busy = false
+            updateCachedAnchors()
+            if result.lines.isEmpty { show("文字が読み取れませんでした。もう一度お試しください") }
         }
     }
 

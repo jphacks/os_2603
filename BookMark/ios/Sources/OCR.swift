@@ -25,44 +25,47 @@ enum OCR {
         guard let cg = image.cgImage else {
             return OCRResult(lines: [], pageNumber: nil)
         }
+        guard !Task.isCancelled else { return OCRResult(lines: [], pageNumber: nil) }
         let orientation = cgOrientation(image.imageOrientation)
 
-        return await withCheckedContinuation { continuation in
-            let request = VNRecognizeTextRequest { request, _ in
-                let observations =
-                    (request.results as? [VNRecognizedTextObservation]) ?? []
-                var lines: [OCRLine] = []
-                for obs in observations {
-                    guard let top = obs.topCandidates(1).first else { continue }
-                    let bb = obs.boundingBox  // 正規化・左下原点
-                    let rect = CGRect(
-                        x: bb.minX, y: 1 - bb.maxY,
-                        width: bb.width, height: bb.height)
-                    lines.append(OCRLine(text: top.string, rect: rect))
+        let request = VNRecognizeTextRequest()
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                request.recognitionLanguages = ["ja-JP", "en-US"]
+                request.recognitionLevel = .accurate
+                request.usesLanguageCorrection = true
+                if let roi {
+                    // Vision は左下原点なので上下を反転。[0,1]にクランプ。
+                    let y = max(0, min(1, 1 - roi.maxY))
+                    let h = max(0, min(1 - y, roi.height))
+                    let x = max(0, min(1, roi.minX))
+                    let w = max(0, min(1 - x, roi.width))
+                    request.regionOfInterest = CGRect(x: x, y: y, width: w, height: h)
                 }
-                lines.sort { $0.rect.minY < $1.rect.minY }
-                continuation.resume(
-                    returning: OCRResult(
-                        lines: lines, pageNumber: detectPageNumber(lines)))
-            }
-            request.recognitionLanguages = ["ja-JP", "en-US"]
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-            if let roi {
-                // Vision は左下原点なので上下を反転。[0,1]にクランプ。
-                let y = max(0, min(1, 1 - roi.maxY))
-                let h = max(0, min(1 - y, roi.height))
-                let x = max(0, min(1, roi.minX))
-                let w = max(0, min(1 - x, roi.width))
-                request.regionOfInterest = CGRect(x: x, y: y, width: w, height: h)
-            }
 
-            let handler = VNImageRequestHandler(
-                cgImage: cg, orientation: orientation, options: [:])
-            DispatchQueue.global(qos: .userInitiated).async {
-                try? handler.perform([request])
+                let handler = VNImageRequestHandler(
+                    cgImage: cg, orientation: orientation, options: [:])
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try handler.perform([request])
+                        let lines = (request.results ?? []).compactMap { observation -> OCRLine? in
+                            guard let text = observation.topCandidates(1).first?.string else { return nil }
+                            let box = observation.boundingBox
+                            return OCRLine(text: text, rect: CGRect(
+                                x: box.minX, y: 1 - box.maxY,
+                                width: box.width, height: box.height))
+                        }.sorted { $0.rect.minY < $1.rect.minY }
+                        continuation.resume(returning: OCRResult(
+                            lines: lines, pageNumber: detectPageNumber(lines)))
+                    } catch {
+                        // perform 自体が失敗した場合も必ず待機を終了する。
+                        continuation.resume(returning: OCRResult(lines: [], pageNumber: nil))
+                    }
+                }
             }
-        }
+        }, onCancel: {
+            request.cancel()
+        })
     }
 
     // ページ番号推定（数字だけの行で、上下の余白に近いものを優先）。
@@ -95,5 +98,38 @@ enum OCR {
         case .rightMirrored: return .rightMirrored
         @unknown default: return .up
         }
+    }
+}
+
+// 認識済みの行から付箋を作る処理。UI と切り離し、全体・範囲 OCR で共用する。
+struct OCRSelection {
+    let marker: String
+    let before: [String]
+    let after: [String]
+
+    static func expandedRegion(for rect: CGRect) -> CGRect {
+        let pad = max(0.03, rect.height * 0.9)
+        return rect.insetBy(dx: -0.02, dy: -pad)
+            .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    static func extract(from lines: [OCRLine], in rect: CGRect,
+                        requireWholeLines: Bool = false) -> OCRSelection? {
+        let region = expandedRegion(for: rect)
+        let nearby = lines.filter {
+            !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            $0.rect.maxX > rect.minX && $0.rect.minX < rect.maxX &&
+            $0.rect.midY >= region.minY && $0.rect.midY <= region.maxY
+        }.sorted { $0.rect.minY < $1.rect.minY }
+        let selected = nearby.filter { $0.rect.midY >= rect.minY && $0.rect.midY <= rect.maxY }
+        guard !selected.isEmpty else { return nil }
+        // 行の一部だけを囲んだ場合は、全体OCRの行全文を保存せず範囲OCRへ戻す。
+        if requireWholeLines && selected.contains(where: {
+            $0.rect.minX < region.minX || $0.rect.maxX > region.maxX
+        }) { return nil }
+        return OCRSelection(
+            marker: selected.map { $0.text }.joined(),
+            before: Array(nearby.filter { $0.rect.midY < rect.minY }.suffix(2).map { $0.text }),
+            after: Array(nearby.filter { $0.rect.midY > rect.maxY }.prefix(2).map { $0.text }))
     }
 }
