@@ -6,6 +6,9 @@ import UIKit
 struct BookDetailView: View {
     @Environment(\.modelContext) private var context
     @Bindable var book: Book
+    /// 起動直後に開かれたときだけ true。画面が出たらすぐカメラを起動する。
+    var openCameraOnAppear = false
+    var onCameraOpened: () -> Void = {}
 
     @State private var photo: UIImage?
     @State private var pageNumber: Int?
@@ -95,8 +98,22 @@ struct BookDetailView: View {
                 onClose: { showReview = false })
         }
         .onChange(of: pickerItem) { _, newItem in loadPicked(newItem) }
-        .onAppear { AppStore.lastBookId = book.id.uuidString }
+        .onAppear {
+            AppStore.lastBookId = book.id.uuidString
+            openCameraIfLaunching()
+        }
         .overlay(alignment: .bottom) { undoToast }
+    }
+
+    // MARK: - 起動直後のカメラ
+
+    private func openCameraIfLaunching() {
+        guard openCameraOnAppear else { return }
+        onCameraOpened()   // 一度だけ（戻ってきたときに再び開かない）
+        // カメラが無い端末（シミュレータ）では本の画面のまま
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
+        // 画面遷移のアニメーションが終わってから出す（同時だと表示されないことがある）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showCamera = true }
     }
 
     // MARK: - 剥がし処理

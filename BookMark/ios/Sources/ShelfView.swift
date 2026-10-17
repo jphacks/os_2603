@@ -7,6 +7,7 @@ struct ShelfView: View {
     @State private var showAdd = false
     @State private var path: [Book] = []
     @State private var didAutoOpen = false
+    @State private var launchCameraBookID: UUID?   // 起動直後にカメラを開く本
 
     private let columns = [GridItem(.flexible(), spacing: 22, alignment: .top),
                            GridItem(.flexible(), spacing: 22, alignment: .top)]
@@ -45,7 +46,10 @@ struct ShelfView: View {
             .background(BooksStyle.background)
             .navigationTitle("BookMark")
             .navigationDestination(for: Book.self) { book in
-                BookDetailView(book: book)
+                BookDetailView(
+                    book: book,
+                    openCameraOnAppear: book.id == launchCameraBookID,
+                    onCameraOpened: { launchCameraBookID = nil })
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -61,6 +65,8 @@ struct ShelfView: View {
                 seedIfEmpty()
                 autoOpenLastBook()
             }
+            // 初回起動はサンプルの本が入ってから開く
+            .onChange(of: books.count) { _, _ in autoOpenLastBook() }
         }
     }
 
@@ -70,14 +76,15 @@ struct ShelfView: View {
         context.insert(Book(title: "アルゴリズムとデータ構造 入門", author: "佐藤"))
     }
 
-    // 起動時、最後に開いた本の撮影画面から始める（本を選ぶ手間をなくす）。
+    // 起動時、前回開いた本（なければ一番新しい本）を開いて、すぐカメラを起動する。
+    // ページ番号は本ごとに前回の値を引き継ぐ（setPhoto 側で AppStore から読む）。
     private func autoOpenLastBook() {
         guard !didAutoOpen else { return }
+        let last = AppStore.lastBookId.flatMap { id in books.first { $0.id.uuidString == id } }
+        guard let book = last ?? books.first else { return }
         didAutoOpen = true
-        if let id = AppStore.lastBookId,
-           let book = books.first(where: { $0.id.uuidString == id }) {
-            path = [book]
-        }
+        launchCameraBookID = book.id
+        path = [book]
     }
 }
 
