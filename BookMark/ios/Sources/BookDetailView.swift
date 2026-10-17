@@ -18,6 +18,7 @@ struct BookDetailView: View {
     @State private var showFlip = false
     @State private var showReview = false
     @State private var showMastered = false
+    @State private var showQuickMemo = false
 
     @State private var undoSticky: Sticky?
     @State private var showUndo = false
@@ -30,6 +31,18 @@ struct BookDetailView: View {
 
     private var masteredCount: Int { book.stickies.filter { $0.mastered }.count }
     private var totalPlaced: Int { book.stickies.filter { $0.placed }.count }
+
+    // ページごとの付箋グループ（小口ビューからのスクロール用）
+    private var placedByPage: [(page: Int, stickies: [Sticky])] {
+        let dict = Dictionary(grouping: placed) { $0.pageNumber }
+        return dict.keys.sorted().map { ($0, dict[$0]!) }
+    }
+
+    // 位置未定のメモ（A5：写真なしで先に残したメモ）
+    private var unplacedMemos: [Sticky] {
+        book.stickies.filter { !$0.placed && !$0.mastered }
+            .sorted { $0.pageNumber < $1.pageNumber }
+    }
 
     var body: some View {
         Group {
@@ -50,6 +63,9 @@ struct BookDetailView: View {
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
         .sheet(isPresented: $showMastered) {
             MasteredView(book: book)
+        }
+        .sheet(isPresented: $showQuickMemo) {
+            QuickMemoSheet(book: book, defaultPage: pageNumber ?? AppStore.lastPage(for: book.id))
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { img in
@@ -127,6 +143,7 @@ struct BookDetailView: View {
     // MARK: - 撮影・一覧
 
     private var captureAndList: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 14) {
                 // 表紙・書名・著者（Apple Books の本の詳細のように中央に大きく）
@@ -164,7 +181,25 @@ struct BookDetailView: View {
                 Text("囲んで拡大し、確認してから付箋を追加")
                     .font(.caption).foregroundStyle(BooksStyle.subInk)
 
+                // メモだけモード（A5：撮影せずページ番号＋メモで付箋）
+                Button { showQuickMemo = true } label: {
+                    Label("メモだけ残す（声でも）", systemImage: "mic.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(CaptureButton(ghost: true))
+
                 Divider().padding(.vertical, 6)
+
+                // 位置未定のメモ（後で撮って囲むと配置される）
+                if !unplacedMemos.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("位置未定のメモ \(unplacedMemos.count)件（撮って囲むと配置）")
+                            .font(.caption.weight(.semibold)).foregroundStyle(BooksStyle.accent)
+                        ForEach(unplacedMemos) { s in
+                            StickyRow(sticky: s).onTapGesture { editing = s }
+                        }
+                    }
+                }
 
                 // 付箋数・覚えた数
                 if totalPlaced > 0 {
@@ -191,7 +226,15 @@ struct BookDetailView: View {
                 .buttonStyle(CaptureButton(ghost: true))
                 .disabled(placed.isEmpty)
 
-                // 付箋一覧（剥がし対応）
+                // 本の小口ビュー（B2）：タブをタップでそのページへスクロール
+                if !placed.isEmpty {
+                    BookSpineView(book: book) { pn in
+                        withAnimation { proxy.scrollTo("page-\(pn)", anchor: .top) }
+                    }
+                    .padding(.top, 2)
+                }
+
+                // 付箋一覧（ページごと・剥がし対応）
                 if placed.isEmpty {
                     ContentUnavailableView(
                         "まだ付箋がありません",
@@ -199,15 +242,26 @@ struct BookDetailView: View {
                         description: Text("撮って、貼りたい部分を囲んでみましょう"))
                         .padding(.top, 20)
                 } else {
-                    ForEach(placed) { s in
-                        StickyRow(sticky: s)
-                            .peelable { markMastered(s) }
-                            .onTapGesture { editing = s }
+                    ForEach(placedByPage, id: \.page) { group in
+                        VStack(spacing: 10) {
+                            HStack {
+                                Text("p.\(group.page)")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(BooksStyle.subInk)
+                                Spacer()
+                            }
+                            ForEach(group.stickies) { s in
+                                StickyRow(sticky: s)
+                                    .peelable { handlePeel(s) }
+                                    .onTapGesture { editing = s }
+                            }
+                        }
+                        .id("page-\(group.page)")
                     }
                 }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
+        }
         }
     }
 
@@ -269,6 +323,9 @@ struct PhotoReaderView: View {
     private var activeStickies: [Sticky] {
         book.stickies.filter { $0.placed && !$0.mastered && $0.pageNumber == pageNumber }
     }
+    private var pageUnplaced: [Sticky] {
+        book.stickies.filter { !$0.placed && !$0.mastered && $0.pageNumber == pageNumber }
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -303,6 +360,11 @@ struct PhotoReaderView: View {
                         }
                     }
                 }.font(.caption).padding(.horizontal, 20)
+            }
+            if selectedRect == nil && !pageUnplaced.isEmpty {
+                Text("このページに位置未定のメモが\(pageUnplaced.count)件。囲むと配置されます")
+                    .font(.caption).foregroundStyle(BooksStyle.accent)
+                    .padding(.horizontal, 20)
             }
             if let message {
                 Text(message).font(.caption).foregroundStyle(.secondary)
@@ -554,10 +616,25 @@ struct PhotoReaderView: View {
     private func confirmSelection() {
         guard !busy, let draft, let rect = selectedRect,
               let page = draftPage, pageNumber == page else { return }
-        let sticky = Sticky(pageNumber: page, placed: true, marker: draft.marker,
+        let sticky: Sticky
+        // A5：このページに位置未定のメモがあれば、それを配置する（新規作成しない）。
+        if let pending = book.stickies
+            .filter({ !$0.placed && !$0.mastered && $0.pageNumber == page })
+            .min(by: { $0.createdAt < $1.createdAt }) {
+            pending.placed = true
+            pending.marker = draft.marker
+            pending.clipBefore = draft.before
+            pending.clipAfter = draft.after
+            if pending.heading.isEmpty || pending.heading == "付箋" {
+                pending.heading = Sticky.makeHeading(memo: "", marker: draft.marker)
+            }
+            sticky = pending
+        } else {
+            sticky = Sticky(pageNumber: page, placed: true, marker: draft.marker,
                             clipBefore: draft.before, clipAfter: draft.after,
                             color: StickyColor.cycle(book.stickies.count), book: book)
-        context.insert(sticky)
+            context.insert(sticky)
+        }
         localPins[sticky.id] = rect
         AppStore.setLastPage(page, for: book.id)
         AIHelper.improveHeading(for: sticky)
@@ -684,6 +761,11 @@ struct StickyRow: View {
                 HStack {
                     Text(sticky.heading).font(.headline).foregroundStyle(BooksStyle.ink).lineLimit(1)
                     Spacer()
+                    Text(AppStore.colorName(sticky.color))
+                        .font(.caption2)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(sticky.color.color.opacity(0.4), in: Capsule())
+                        .foregroundStyle(BooksStyle.ink)
                     Text(String(repeating: "★", count: sticky.importance))
                         .font(.caption2).foregroundStyle(BooksStyle.ink)
                     Text("p.\(sticky.pageNumber)")
@@ -715,6 +797,7 @@ struct StickyEditor: View {
     @Environment(VaultManager.self) private var vault
     @Bindable var sticky: Sticky
     @State private var memoText: String = ""
+    @State private var colorNameText: String = ""
     @State private var encryptTask: Task<Void, Never>?
     @State private var summarizing = false
     @State private var summaryMessage: String?
@@ -775,10 +858,26 @@ struct StickyEditor: View {
                 Section("色") {
                     HStack(spacing: 12) {
                         ForEach(StickyColor.allCases, id: \.self) { c in
-                            Circle().fill(c.color).frame(width: 32, height: 32)
-                                .overlay(Circle().stroke(.primary, lineWidth: sticky.color == c ? 2 : 0))
-                                .onTapGesture { sticky.color = c }
+                            VStack(spacing: 4) {
+                                Circle().fill(c.color).frame(width: 32, height: 32)
+                                    .overlay(Circle().stroke(.primary, lineWidth: sticky.color == c ? 2 : 0))
+                                Text(AppStore.colorName(c))
+                                    .font(.caption2)
+                                    .foregroundStyle(sticky.color == c ? BooksStyle.ink : BooksStyle.subInk)
+                            }
+                            .onTapGesture {
+                                sticky.color = c
+                                colorNameText = AppStore.colorName(c)
+                            }
                         }
+                    }
+                    HStack {
+                        Text("この色の名前").font(.caption).foregroundStyle(.secondary)
+                        TextField("例）重要", text: $colorNameText)
+                            .multilineTextAlignment(.trailing)
+                            .onChange(of: colorNameText) { _, v in
+                                AppStore.setColorName(v, for: sticky.color)
+                            }
                     }
                 }
                 Section("重要度") {
@@ -798,6 +897,7 @@ struct StickyEditor: View {
                 } else {
                     memoText = sticky.memo
                 }
+                colorNameText = AppStore.colorName(sticky.color)
             }
             .task(id: sticky.id) {
                 if sticky.summarizedText == nil { await summarize() }
