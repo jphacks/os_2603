@@ -136,7 +136,7 @@ struct PeelQuizView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.969, green: 0.957, blue: 0.925).ignoresSafeArea()
+            BooksStyle.background.ignoresSafeArea()
             VStack(spacing: 0) {
                 // ハンドル
                 Capsule()
@@ -161,10 +161,12 @@ struct PeelQuizView: View {
                         }
                         .padding(20)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(red: 1, green: 0.992, blue: 0.973))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .overlay(RoundedRectangle(cornerRadius: 16)
-                            .stroke(sticky.color.color, lineWidth: 2))
+                        .background(BooksStyle.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .overlay(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2).fill(sticky.color.color)
+                                .frame(width: 5).padding(.vertical, 16)
+                        }
 
                         // ヒント（周辺の切り抜き）
                         if !sticky.clipBefore.isEmpty || !sticky.clipAfter.isEmpty {
@@ -173,8 +175,9 @@ struct PeelQuizView: View {
                                 contextText
                             }
                             .padding(14)
-                            .background(Color.secondary.opacity(0.07))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(BooksStyle.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
 
                         // 答え
@@ -214,14 +217,14 @@ struct PeelQuizView: View {
 
     @ViewBuilder private var contextText: some View {
         ForEach(sticky.clipBefore, id: \.self) {
-            Text($0).font(.caption).foregroundStyle(.secondary)
+            Text($0).font(BooksStyle.serif(.caption)).foregroundStyle(.secondary)
         }
-        Text(sticky.marker).font(.caption).bold()
+        Text(sticky.marker).font(BooksStyle.serif(.caption)).bold()
             .padding(.horizontal, 3).padding(.vertical, 1)
             .background(sticky.color.color.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: 3))
         ForEach(sticky.clipAfter, id: \.self) {
-            Text($0).font(.caption).foregroundStyle(.secondary)
+            Text($0).font(BooksStyle.serif(.caption)).foregroundStyle(.secondary)
         }
     }
 
@@ -245,9 +248,8 @@ private struct PeelButtonStyle: ButtonStyle {
         configuration.label
             .font(.subheadline).bold()
             .padding(.vertical, 14)
-            .foregroundStyle(filled ? .white : .primary)
-            .background(filled ? Color.black : Color.primary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .foregroundStyle(filled ? .white : BooksStyle.ink)
+            .background(filled ? BooksStyle.ink : BooksStyle.card, in: Capsule())
             .opacity(configuration.isPressed ? 0.8 : 1)
     }
 }

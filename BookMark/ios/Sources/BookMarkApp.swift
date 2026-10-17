@@ -25,8 +25,9 @@ struct BookMarkApp: App {
     var body: some Scene {
         WindowGroup {
             ShelfView()
-                .background(Color(red: 0.969, green: 0.957, blue: 0.925))
-                .preferredColorScheme(.light)   // 明るい紙デザイン固定（ダークモードで文字が消えるのを防ぐ）
+                .background(BooksStyle.background)
+                .preferredColorScheme(.light)   // 白基調のデザイン固定（ダークモードで文字が消えるのを防ぐ）
+                .tint(BooksStyle.ink)
         }
         .modelContainer(container)
     }

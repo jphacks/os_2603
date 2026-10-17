@@ -8,13 +8,13 @@ struct ShelfView: View {
     @State private var path: [Book] = []
     @State private var didAutoOpen = false
 
-    private let columns = [GridItem(.flexible(), spacing: 14),
-                           GridItem(.flexible(), spacing: 14)]
+    private let columns = [GridItem(.flexible(), spacing: 22, alignment: .top),
+                           GridItem(.flexible(), spacing: 22, alignment: .top)]
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 14) {
+                LazyVGrid(columns: columns, spacing: 28) {
                     ForEach(books) { book in
                         NavigationLink(value: book) {
                             BookCard(book: book)
@@ -24,22 +24,26 @@ struct ShelfView: View {
                     Button {
                         showAdd = true
                     } label: {
-                        VStack {
-                            Image(systemName: "plus")
-                            Text("本を追加").font(.subheadline)
+                        VStack(alignment: .leading, spacing: 8) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(BooksStyle.card)
+                                .aspectRatio(2 / 3, contentMode: .fit)
+                                .overlay {
+                                    VStack(spacing: 6) {
+                                        Image(systemName: "plus").font(.title2)
+                                        Text("本を追加").font(.subheadline.weight(.semibold))
+                                    }
+                                    .foregroundStyle(BooksStyle.subInk)
+                                }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 132)
-                        .foregroundStyle(.secondary)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6]))
-                                .foregroundStyle(.secondary.opacity(0.5)))
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(16)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
             }
-            .background(Color(red: 0.969, green: 0.957, blue: 0.925))
-            .navigationTitle("📖 BookMark")
+            .background(BooksStyle.background)
+            .navigationTitle("BookMark")
             .navigationDestination(for: Book.self) { book in
                 BookDetailView(book: book)
             }
@@ -81,34 +85,28 @@ private struct BookCard: View {
     let book: Book
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            BookCoverView(book: book)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 4)
             Text(book.title)
-                .font(.headline)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(BooksStyle.ink)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
-            Spacer(minLength: 4)
             Text(book.author ?? "著者不明")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(BooksStyle.subInk)
+                .lineLimit(1)
             let active = book.stickies.filter { !$0.mastered }.count
             let mastered = book.stickies.filter { $0.mastered }.count
             HStack(spacing: 4) {
                 Text("付箋 \(active)").font(.caption).bold()
-                    .foregroundStyle(Color(red: 0.75, green: 0.26, blue: 0.17))
+                    .foregroundStyle(BooksStyle.ink)
                 if mastered > 0 {
-                    Text("✓\(mastered)").font(.caption2).foregroundStyle(.secondary)
+                    Text("✓\(mastered)").font(.caption2).foregroundStyle(BooksStyle.subInk)
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
-        .padding(14)
-        .background(Color(red: 1.0, green: 0.992, blue: 0.973))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Color(red: 0.75, green: 0.26, blue: 0.17))
-                .frame(width: 5)
-                .padding(.vertical, 12)
-        }
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.08)))
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 

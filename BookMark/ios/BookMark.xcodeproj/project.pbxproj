@@ -6,75 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		10204D173083A2CD002E5ACF /* TrashGameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D163083A2CD002E5ACF /* TrashGameView.swift */; };
-		10204D193083A2DD002E5ACF /* RecallDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D183083A2DD002E5ACF /* RecallDemoApp.swift */; };
-		10204D1B3083A2F7002E5ACF /* RecallCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D1A3083A2F7002E5ACF /* RecallCrypto.swift */; };
-		10204D1D3083A303002E5ACF /* PeelModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D1C3083A303002E5ACF /* PeelModifier.swift */; };
-		10204D1F3083A30E002E5ACF /* MasteredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D1E3083A30E002E5ACF /* MasteredView.swift */; };
-		10204D213083A338002E5ACF /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D203083A338002E5ACF /* ContentView.swift */; };
-		10204D233083A34D002E5ACF /* ExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D223083A34D002E5ACF /* ExportView.swift */; };
-		10204D253083A359002E5ACF /* AIHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10204D243083A359002E5ACF /* AIHelper.swift */; };
-		2C18767306C993604DF02CF7 /* ShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A633853A9C53ADA601660AA /* ShelfView.swift */; };
-		31FB05BEA39ECA1364189751 /* BookDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5AF576E0B2DEEDCC042523 /* BookDetailView.swift */; };
-		60B920EB38592CB8198E59F1 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = C28F001DB805A132BF7C20A0 /* Store.swift */; };
-		747C296ABDDFFA3DDA2E3116 /* Matching.swift in Sources */ = {isa = PBXBuildFile; fileRef = E53281EEF8D93CAAB33D3A68 /* Matching.swift */; };
-		83A00392D4F97B633628855C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F6B1F5E9F0275C051F5741B /* Models.swift */; };
-		9489605CA35B40F03F16E98E /* SampleImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1C688E701D40E1FA8F4DEDB /* SampleImage.swift */; };
-		948CFD9D7BE402B45FE89DCE /* OCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6870741D3113B07A5372E2B8 /* OCR.swift */; };
-		A9022AEC60A5BF8D802CACBF /* FlipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC6A681320E1EF786264876F /* FlipView.swift */; };
-		AB68F3D9FEA53E5ED35337DF /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACBB02A5485DC6B847B4BFD /* ReviewView.swift */; };
-		B4774AC4BCA3B291DD252206 /* BookMarkApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1B991810ED87C84DEA71C4 /* BookMarkApp.swift */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
-		10204D163083A2CD002E5ACF /* TrashGameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashGameView.swift; sourceTree = "<group>"; };
-		10204D183083A2DD002E5ACF /* RecallDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecallDemoApp.swift; sourceTree = "<group>"; };
-		10204D1A3083A2F7002E5ACF /* RecallCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecallCrypto.swift; sourceTree = "<group>"; };
-		10204D1C3083A303002E5ACF /* PeelModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeelModifier.swift; sourceTree = "<group>"; };
-		10204D1E3083A30E002E5ACF /* MasteredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasteredView.swift; sourceTree = "<group>"; };
-		10204D203083A338002E5ACF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		10204D223083A34D002E5ACF /* ExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportView.swift; sourceTree = "<group>"; };
-		10204D243083A359002E5ACF /* AIHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIHelper.swift; sourceTree = "<group>"; };
-		1A633853A9C53ADA601660AA /* ShelfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfView.swift; sourceTree = "<group>"; };
-		2B1B991810ED87C84DEA71C4 /* BookMarkApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookMarkApp.swift; sourceTree = "<group>"; };
-		3F6B1F5E9F0275C051F5741B /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		6870741D3113B07A5372E2B8 /* OCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCR.swift; sourceTree = "<group>"; };
 		8E0942C9CC3B1843A1DFD645 /* BookMark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BookMark.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		BC6A681320E1EF786264876F /* FlipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlipView.swift; sourceTree = "<group>"; };
-		C1C688E701D40E1FA8F4DEDB /* SampleImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleImage.swift; sourceTree = "<group>"; };
-		C28F001DB805A132BF7C20A0 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
-		DD5AF576E0B2DEEDCC042523 /* BookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookDetailView.swift; sourceTree = "<group>"; };
-		E53281EEF8D93CAAB33D3A68 /* Matching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Matching.swift; sourceTree = "<group>"; };
-		EACBB02A5485DC6B847B4BFD /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXGroup section */
+/* Begin PBXFileSystemSynchronizedRootGroup section */
 		2519DD802D02F64CA2F55EF4 /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				10204D163083A2CD002E5ACF /* TrashGameView.swift */,
-				10204D183083A2DD002E5ACF /* RecallDemoApp.swift */,
-				10204D1A3083A2F7002E5ACF /* RecallCrypto.swift */,
-				10204D1C3083A303002E5ACF /* PeelModifier.swift */,
-				10204D1E3083A30E002E5ACF /* MasteredView.swift */,
-				DD5AF576E0B2DEEDCC042523 /* BookDetailView.swift */,
-				2B1B991810ED87C84DEA71C4 /* BookMarkApp.swift */,
-				BC6A681320E1EF786264876F /* FlipView.swift */,
-				E53281EEF8D93CAAB33D3A68 /* Matching.swift */,
-				3F6B1F5E9F0275C051F5741B /* Models.swift */,
-				6870741D3113B07A5372E2B8 /* OCR.swift */,
-				EACBB02A5485DC6B847B4BFD /* ReviewView.swift */,
-				C1C688E701D40E1FA8F4DEDB /* SampleImage.swift */,
-				1A633853A9C53ADA601660AA /* ShelfView.swift */,
-				C28F001DB805A132BF7C20A0 /* Store.swift */,
-				10204D203083A338002E5ACF /* ContentView.swift */,
-				10204D223083A34D002E5ACF /* ExportView.swift */,
-				10204D243083A359002E5ACF /* AIHelper.swift */,
-			);
+			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Sources;
 			sourceTree = "<group>";
 		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXGroup section */
 		82B586DAA9CC4FFFA5E53873 = {
 			isa = PBXGroup;
 			children = (
@@ -103,6 +47,9 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2519DD802D02F64CA2F55EF4 /* Sources */,
 			);
 			name = BookMark;
 			packageProductDependencies = (
@@ -149,24 +96,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				31FB05BEA39ECA1364189751 /* BookDetailView.swift in Sources */,
-				B4774AC4BCA3B291DD252206 /* BookMarkApp.swift in Sources */,
-				10204D213083A338002E5ACF /* ContentView.swift in Sources */,
-				10204D253083A359002E5ACF /* AIHelper.swift in Sources */,
-				A9022AEC60A5BF8D802CACBF /* FlipView.swift in Sources */,
-				10204D193083A2DD002E5ACF /* RecallDemoApp.swift in Sources */,
-				747C296ABDDFFA3DDA2E3116 /* Matching.swift in Sources */,
-				10204D233083A34D002E5ACF /* ExportView.swift in Sources */,
-				10204D1B3083A2F7002E5ACF /* RecallCrypto.swift in Sources */,
-				10204D1D3083A303002E5ACF /* PeelModifier.swift in Sources */,
-				83A00392D4F97B633628855C /* Models.swift in Sources */,
-				948CFD9D7BE402B45FE89DCE /* OCR.swift in Sources */,
-				10204D173083A2CD002E5ACF /* TrashGameView.swift in Sources */,
-				AB68F3D9FEA53E5ED35337DF /* ReviewView.swift in Sources */,
-				9489605CA35B40F03F16E98E /* SampleImage.swift in Sources */,
-				2C18767306C993604DF02CF7 /* ShelfView.swift in Sources */,
-				10204D1F3083A30E002E5ACF /* MasteredView.swift in Sources */,
-				60B920EB38592CB8198E59F1 /* Store.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
