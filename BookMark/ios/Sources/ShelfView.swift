@@ -88,9 +88,15 @@ private struct BookCard: View {
             Spacer(minLength: 4)
             Text(book.author ?? "著者不明")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("付箋 \(book.stickies.count)")
-                .font(.caption).bold()
-                .foregroundStyle(Color(red: 0.75, green: 0.26, blue: 0.17))
+            let active = book.stickies.filter { !$0.mastered }.count
+            let mastered = book.stickies.filter { $0.mastered }.count
+            HStack(spacing: 4) {
+                Text("付箋 \(active)").font(.caption).bold()
+                    .foregroundStyle(Color(red: 0.75, green: 0.26, blue: 0.17))
+                if mastered > 0 {
+                    Text("✓\(mastered)").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
         .padding(14)
