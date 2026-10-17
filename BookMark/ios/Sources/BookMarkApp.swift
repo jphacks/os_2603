@@ -8,6 +8,7 @@ import SwiftData
 @main
 struct BookMarkApp: App {
     let container: ModelContainer
+    let vault = VaultManager()
 
     init() {
         // 端末でのストア初期化が失敗しても起動を落とさない（黒画面＝クラッシュ対策）。
@@ -25,6 +26,7 @@ struct BookMarkApp: App {
     var body: some Scene {
         WindowGroup {
             ShelfView()
+                .environment(vault)
                 .background(BooksStyle.background)
                 .preferredColorScheme(.light)   // 白基調のデザイン固定（ダークモードで文字が消えるのを防ぐ）
                 .tint(BooksStyle.ink)

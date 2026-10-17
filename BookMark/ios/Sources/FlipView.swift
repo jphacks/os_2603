@@ -106,6 +106,12 @@ struct FlipView: View {
 private struct FlipCard: View {
     let sticky: Sticky
     var onPeelTapped: () -> Void
+    @Environment(VaultManager.self) private var vault
+
+    private var displayMemo: String {
+        if let data = sticky.encryptedMemo { return vault.decrypt(data) ?? "" }
+        return sticky.memo
+    }
 
     var body: some View {
         ScrollView {
@@ -133,8 +139,8 @@ private struct FlipCard: View {
                 }
                 .padding(.top, 6)
 
-                if !sticky.memo.isEmpty {
-                    Text(sticky.memo)
+                if !displayMemo.isEmpty {
+                    Text(displayMemo)
                         .foregroundStyle(BooksStyle.ink)
                         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
                         .background(BooksStyle.card)
