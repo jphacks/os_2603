@@ -13,6 +13,8 @@ struct BookDetailView: View {
     @State private var showCamera = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var editing: Sticky?
+    @State private var showFlip = false
+    @State private var showReview = false
 
     private var placed: [Sticky] {
         book.stickies.filter { $0.placed }
@@ -48,6 +50,12 @@ struct BookDetailView: View {
             }
             .ignoresSafeArea()
         }
+        .fullScreenCover(isPresented: $showFlip) {
+            FlipView(stickies: placed, bookTitle: book.title) { showFlip = false }
+        }
+        .fullScreenCover(isPresented: $showReview) {
+            ReviewView(stickies: placed) { showReview = false }
+        }
         .onChange(of: pickerItem) { _, newItem in loadPicked(newItem) }
     }
 
@@ -77,6 +85,21 @@ struct BookDetailView: View {
 
                 Text("📸 コツ: 片方のページだけを正面から・明るく・なるべく平らに")
                     .font(.caption).foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button { showFlip = true } label: {
+                        Label("パラパラ", systemImage: "book")
+                            .frame(maxWidth: .infinity)
+                    }
+                    Button { showReview = true } label: {
+                        Label("復習", systemImage: "brain.head.profile")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+                .disabled(placed.isEmpty)
+                .padding(.top, 2)
 
                 if placed.isEmpty {
                     ContentUnavailableView(
