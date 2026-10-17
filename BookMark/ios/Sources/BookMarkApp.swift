@@ -16,7 +16,6 @@ struct BookMarkApp: App {
             container = try ModelContainer(for: Book.self, Sticky.self)
         } catch {
             print("ModelContainer failed, falling back to in-memory: \(error)")
-            // 最低限メモリ内で起動する
             container = try! ModelContainer(
                 for: Book.self, Sticky.self,
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true))
@@ -28,7 +27,7 @@ struct BookMarkApp: App {
             ShelfView()
                 .environment(vault)
                 .background(BooksStyle.background)
-                .preferredColorScheme(.light)   // 白基調のデザイン固定（ダークモードで文字が消えるのを防ぐ）
+                .preferredColorScheme(.light)
                 .tint(BooksStyle.ink)
         }
         .modelContainer(container)

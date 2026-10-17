@@ -194,12 +194,6 @@ struct BookDetailView: View {
                     .buttonStyle(CaptureButton(ghost: UIImagePickerController.isSourceTypeAvailable(.camera)))
                 }
 
-                Button { setPhoto(Sample.render(Sample.pages[0])) } label: {
-                    Label("サンプル画像で試す", systemImage: "wand.and.stars")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(BooksStyle.accent)
-                }
-
                 Text("囲んで拡大し、確認してから付箋を追加")
                     .font(.caption).foregroundStyle(BooksStyle.subInk)
 
@@ -229,13 +223,6 @@ struct BookDetailView: View {
                 }
                 .buttonStyle(CaptureButton(ghost: true))
                 .disabled(placed.isEmpty)
-
-                // 書き出しボタン
-                ExportButton(book: book)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(BooksStyle.accent)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .disabled(placed.isEmpty)
 
                 // 付箋一覧（剥がし対応）
                 if placed.isEmpty {
@@ -810,8 +797,10 @@ struct StickyEditor: View {
                             encryptTask = Task {
                                 try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒待つ
                                 guard !Task.isCancelled else { return }
-                                sticky.encryptedMemo = vault.encrypt(v)
-                                sticky.memo = ""
+                                if let encrypted = vault.encrypt(v) {
+                                    sticky.encryptedMemo = encrypted
+                                    sticky.memo = ""
+                                }
                             }
                         }
 
