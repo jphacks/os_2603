@@ -112,6 +112,7 @@
 				DEVELOPMENT_TEAM = AY4LS6AZR8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "本のページを撮影してOCRするために使います";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "メモを保護するために Face ID を使います";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "メモを声で入力するために使います";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "本のページ画像を選んでOCRするために使います";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "メモを声で入力するために使います";
@@ -193,6 +194,7 @@
 				DEVELOPMENT_TEAM = AY4LS6AZR8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "本のページを撮影してOCRするために使います";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "メモを保護するために Face ID を使います";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "メモを声で入力するために使います";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "本のページ画像を選んでOCRするために使います";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "メモを声で入力するために使います";

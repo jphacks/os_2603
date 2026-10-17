@@ -2,8 +2,8 @@ import Foundation
 import CryptoKit
 import Security
 
-// VaultManager — DEK をアプリ起動時に自動ロード／生成するだけのシンプル版。
-// Face ID・リカバリーキーは保留。Keychain に biometrics なしで保存する。
+// VaultManager — DEK をアプリ起動時に自動ロード／生成。
+// Face ID なし。iOS の Data Protection（デバイスロック）に任せる。
 
 @Observable
 final class VaultManager {
@@ -68,11 +68,11 @@ final class VaultManager {
         ]
         SecItemDelete(delete as CFDictionary)
         let add: [CFString: Any] = [
-            kSecClass:            kSecClassGenericPassword,
-            kSecAttrService:      service,
-            kSecAttrAccount:      account,
-            kSecValueData:        raw,
-            kSecAttrAccessible:   kSecAttrAccessibleWhenUnlocked,
+            kSecClass:          kSecClassGenericPassword,
+            kSecAttrService:    service,
+            kSecAttrAccount:    account,
+            kSecValueData:      raw,
+            kSecAttrAccessible: kSecAttrAccessibleWhenUnlocked,
         ]
         SecItemAdd(add as CFDictionary, nil)
     }
