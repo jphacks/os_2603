@@ -127,6 +127,16 @@ enum AIHelper {
         #endif
     }
 
+    // MARK: - 復習スタイル判定（端末内・非AI）
+
+    /// marker の内容から復習形式を推定する。"qa" または "vocab"。
+    static func inferReviewStyle(marker: String) -> String {
+        if marker.contains("?") || marker.contains("？") { return "qa" }
+        let vocabPatterns = ["とは", "：", ": ", "である。", "という"]
+        if vocabPatterns.contains(where: { marker.contains($0) }) { return "vocab" }
+        return "qa"
+    }
+
     // MARK: - 付箋作成後に非同期で見出しを更新するヘルパー
 
     /// 付箋を保存した直後に呼ぶ。AI が使えれば heading を上書きする。

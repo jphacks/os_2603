@@ -8,7 +8,6 @@ struct ShelfView: View {
     @State private var showAdd = false
     @State private var path: [Book] = []
     @State private var didAutoOpen = false
-    @State private var launchCameraBookID: UUID?   // 起動直後にカメラを開く本
     @State private var query = ""
 
     private let columns = [GridItem(.flexible(), spacing: 22, alignment: .top),
@@ -72,10 +71,7 @@ struct ShelfView: View {
                         prompt: "付箋を検索（見出し・目印・メモ）")
             .navigationTitle("BookMark")
             .navigationDestination(for: Book.self) { book in
-                BookDetailView(
-                    book: book,
-                    openCameraOnAppear: book.id == launchCameraBookID,
-                    onCameraOpened: { launchCameraBookID = nil })
+                BookDetailView(book: book)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -102,14 +98,12 @@ struct ShelfView: View {
         context.insert(Book(title: "アルゴリズムとデータ構造 入門", author: "佐藤"))
     }
 
-    // 起動時、前回開いた本（なければ一番新しい本）を開いて、すぐカメラを起動する。
-    // ページ番号は本ごとに前回の値を引き継ぐ（setPhoto 側で AppStore から読む）。
+    // 起動時、前回開いた本（なければ一番新しい本）を開く。
     private func autoOpenLastBook() {
         guard !didAutoOpen else { return }
         let last = AppStore.lastBookId.flatMap { id in books.first { $0.id.uuidString == id } }
         guard let book = last ?? books.first else { return }
         didAutoOpen = true
-        launchCameraBookID = book.id
         path = [book]
     }
 }

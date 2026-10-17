@@ -1,255 +1,170 @@
 import SwiftUI
 import UIKit
-import AudioToolbox
 
-// 付箋を指で引っ張って「剥がす」ジェスチャー + アニメーション。
+// 付箋を長押し（0.15秒）→ 左右にスワイプして「剥がす」ジェスチャー。
 //
 // 使い方:
-//   SomeCard()
-//     .peelable { onPeel() }
+//   StickyRow(sticky: s)
+//       .peelable(tint: s.color.color) { markMastered(s) }
 //
-// - ドラッグ中: 角がめくれるアニメーション
-// - 閾値(120pt)を超えたら: 触覚 + 効果音 + 丸まって消える → onPeel コールバック
-// - 閾値未満でリリース: 元の位置にスナップバック
+// スワイプ方向の反対側が軸になり、カードがめくれるように持ち上がる。
+// 剥がれたら上に飛んでいく。
 
-private let kPeelThreshold: CGFloat = 120
+struct PeelableSticky<Content: View>: View {
+    let tint: Color
+    let onPeeled: () -> Void
+    @ViewBuilder let content: Content
 
-struct PeelModifier: ViewModifier {
-    let onPeel: () -> Void
+    private enum Side { case right, left }
 
-    @State private var drag: CGSize = .zero
-    @State private var isDragging = false
-    @State private var peeled = false
+    @State private var side: Side? = nil
+    @State private var pull: CGFloat = 0
+    @State private var sway: CGFloat = 0
+    @State private var released = false
+    @State private var gone = false
+    @State private var lastTick: CGFloat = 0
 
-    private let impact = UIImpactFeedbackGenerator(style: .heavy)
+    private let liftEnd: CGFloat = 60
+    private let glueEnd: CGFloat = 130
+    private let glueBand: CGFloat = 0.3
 
-    private var progress: CGFloat {
-        let dist = hypot(drag.width, drag.height)
-        return min(dist / kPeelThreshold, 1.0)
+    private let paper = UIImpactFeedbackGenerator(style: .soft)
+    private let glue  = UIImpactFeedbackGenerator(style: .rigid)
+    private let snap  = UIImpactFeedbackGenerator(style: .heavy)
+
+    // スワイプ方向 → side を逆に割り当てることで、
+    // スワイプ先の辺が軸（のり）になる
+    private var dir: CGFloat { side == .left ? 1 : -1 }
+    private var glueAlign: Alignment { side == .left ? .trailing : .leading }
+    private var freeAlign: Alignment { side == .left ? .leading : .trailing }
+    private var freeEdge: UnitPoint { side == .left ? .leading : .trailing }
+
+    private var lift: CGFloat { min(pull / liftEnd, 1) }
+    private var glueProgress: CGFloat {
+        max(0, min((pull - liftEnd) / (glueEnd - liftEnd), 1))
     }
 
-    func body(content: Content) -> some View {
-        content
-            // コーナーめくれオーバーレイ
-            .overlay(alignment: .bottomTrailing) {
-                if isDragging && progress > 0.05 {
-                    CornerPeelShape(progress: progress)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.55),
-                                    Color(white: 0.85).opacity(0.3)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: .black.opacity(0.18 * progress), radius: 4, x: -2, y: -2)
-                        .allowsHitTesting(false)
-                }
+    private var peelLine: CGFloat { released ? 0 : glueBand * (1 - glueProgress) }
+
+    private var hinge: UnitPoint {
+        UnitPoint(x: side == .left ? 1 - peelLine : peelLine, y: 0.5)
+    }
+
+    private var angle: Double {
+        released ? 25 : Double(50 * lift + 15 * glueProgress)
+    }
+
+    var body: some View {
+        ZStack(alignment: side == .left ? .trailing : .leading) {
+            if side == nil {
+                content
+            } else {
+                // 貼り付き側（軸側）：変形しない
+                content
+                    .mask { band(peelLine + 0.005, align: glueAlign) }
+                    .opacity(gone ? 0 : 1)
+
+                // 浮いた側：剥がれ目を軸にめくれる
+                content
+                    .overlay(
+                        LinearGradient(colors: [.white.opacity(0.25 * lift),
+                                                .black.opacity(0.22 * lift)],
+                                       startPoint: hinge, endPoint: freeEdge)
+                            .allowsHitTesting(false)
+                    )
+                    .mask { band(1 - peelLine, align: freeAlign) }
+                    .rotation3DEffect(.degrees(angle * Double(dir)), axis: (0, 1, 0),
+                                      anchor: hinge, perspective: 0.5)
+                    .shadow(color: .black.opacity(0.08 + 0.2 * lift),
+                            radius: 2 + 10 * lift, x: dir * (2 + 6 * lift), y: 4)
+                    .offset(x: gone ? dir * 80 : (released ? dir * (pull - glueEnd) : 0),
+                            y: gone ? -600 : (released ? sway : 0))
+                    .rotationEffect(.degrees(gone ? Double(dir) * -15 : (released ? Double(sway) / 6 : 0)))
+                    .opacity(gone ? 0 : 1)
             }
-            .offset(drag)
-            .rotationEffect(.degrees(Double(drag.width) * 0.08))
-            .shadow(radius: isDragging ? 10 * progress : 0,
-                    x: drag.width * 0.1, y: drag.height * 0.1)
-            // 剥がれアニメーション: 丸まって小さくなって消える
-            .scaleEffect(peeled ? 0.05 : 1)
-            .opacity(peeled ? 0 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: peeled)
-            .gesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { v in
-                        if !isDragging {
-                            impact.prepare()
-                            isDragging = true
-                        }
-                        withAnimation(.interactiveSpring(response: 0.25)) {
-                            drag = v.translation
-                        }
-                    }
-                    .onEnded { v in
-                        let dist = hypot(v.translation.width, v.translation.height)
-                        if dist >= kPeelThreshold {
-                            triggerPeel()
-                        } else {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
-                                drag = .zero
-                                isDragging = false
-                            }
-                        }
-                    }
-            )
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(tint.opacity(0.25))
+                .mask { band(glueBand, align: glueAlign) }
+                .opacity(side == nil ? 0 : 1)
+        }
+        .gesture(
+            LongPressGesture(minimumDuration: 0.15)
+                .onEnded { _ in paper.impactOccurred(intensity: 0.3) }
+                .sequenced(before: DragGesture(minimumDistance: 0))
+                .onChanged { value in
+                    if case .second(true, let drag?) = value { changed(drag) }
+                }
+                .onEnded { value in
+                    if case .second(true, _) = value { ended() }
+                }
+        )
+        .allowsHitTesting(!gone)
     }
 
-    private func triggerPeel() {
-        impact.impactOccurred()
-        AudioServicesPlaySystemSound(1519) // "Peek" system sound
-        withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) {
-            peeled = true
-            isDragging = false
-        }
-        // アニメーション完了後にコールバック
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-            onPeel()
+    private func band(_ fraction: CGFloat, align: Alignment) -> some View {
+        GeometryReader { g in
+            Rectangle()
+                .frame(width: max(0, g.size.width * fraction))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: align)
         }
     }
-}
 
-// コーナーがめくれて見える三角形（右下コーナー）
-private struct CornerPeelShape: Shape {
-    var progress: CGFloat
+    private func changed(_ v: DragGesture.Value) {
+        if side == nil {
+            guard abs(v.translation.width) > 6 else { return }
+            // スワイプ方向の反対の side を割り当て → スワイプ先が軸になる
+            side = v.translation.width > 0 ? .left : .right
+            glue.prepare(); snap.prepare()
+        }
+        pull = max(0, v.translation.width * dir)
+        sway = v.translation.height
+        tickHaptics()
 
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
+        if !released && pull >= glueEnd {
+            snap.impactOccurred(intensity: 1)
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) {
+                released = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                paper.impactOccurred(intensity: 0.4)
+            }
+        }
     }
 
-    func path(in rect: CGRect) -> Path {
-        let size = min(rect.width, rect.height) * progress
-        var p = Path()
-        p.move(to: CGPoint(x: rect.maxX,       y: rect.maxY - size))
-        p.addLine(to: CGPoint(x: rect.maxX - size, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.maxX,        y: rect.maxY))
-        p.closeSubpath()
-        return p
+    private func ended() {
+        if released {
+            withAnimation(.easeIn(duration: 0.3)) { gone = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onPeeled() }
+        } else {
+            paper.impactOccurred(intensity: 0.5)
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
+                pull = 0; sway = 0
+            } completion: {
+                side = nil
+                lastTick = 0
+            }
+        }
+    }
+
+    private func tickHaptics() {
+        guard !released else { return }
+        if pull < lastTick { lastTick = pull; return }
+        let inGlue = pull >= liftEnd
+        let spacing: CGFloat = inGlue ? 10 - 6 * glueProgress : 18
+        guard pull - lastTick >= spacing else { return }
+        if inGlue {
+            glue.impactOccurred(intensity: 0.4 + 0.6 * glueProgress)
+        } else {
+            paper.impactOccurred(intensity: 0.2)
+        }
+        lastTick = pull
     }
 }
 
 extension View {
-    func peelable(onPeel: @escaping () -> Void) -> some View {
-        modifier(PeelModifier(onPeel: onPeel))
-    }
-}
-
-// MARK: - 剥がした後のクイズカード
-
-/// 付箋を剥がした後に表示する確認ステップ。
-/// 「覚えた」→ onMastered（ゴミ箱ゲームへ）
-/// 「まだ」→ onReturn（付箋を元に戻す）
-struct PeelQuizView: View {
-    let sticky: Sticky
-    var onMastered: () -> Void
-    var onReturn: () -> Void
-
-    @State private var aiQuestion: String?
-    @State private var loadingQuestion = false
-
-    var body: some View {
-        ZStack {
-            BooksStyle.background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                // ハンドル
-                Capsule()
-                    .fill(Color.secondary.opacity(0.3))
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 12)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        // 問題文
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("p.\(sticky.pageNumber) · ここ、覚えてる？")
-                                .font(.footnote).bold().foregroundStyle(.secondary)
-
-                            if loadingQuestion {
-                                ProgressView("問題を生成中…")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            } else {
-                                Text(aiQuestion ?? "この内容、何の話でしたか？")
-                                    .font(.title3).bold()
-                            }
-                        }
-                        .padding(20)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(BooksStyle.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 18))
-                        .overlay(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2).fill(sticky.color.color)
-                                .frame(width: 5).padding(.vertical, 16)
-                        }
-
-                        // ヒント（周辺の切り抜き）
-                        if !sticky.clipBefore.isEmpty || !sticky.clipAfter.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("ヒント").font(.caption2).foregroundStyle(.tertiary)
-                                contextText
-                            }
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(BooksStyle.card)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
-
-                        // 答え
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(sticky.heading).font(.headline)
-                            if !sticky.memo.isEmpty {
-                                Text(sticky.memo).font(.subheadline).foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(sticky.color.color.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-
-                        // ボタン
-                        HStack(spacing: 12) {
-                            Button(action: onReturn) {
-                                Label("まだ", systemImage: "arrow.uturn.backward")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(PeelButtonStyle(filled: false))
-
-                            Button(action: onMastered) {
-                                Label("覚えた！", systemImage: "checkmark")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(PeelButtonStyle(filled: true))
-                        }
-                        .padding(.top, 4)
-                    }
-                    .padding(20)
-                }
-            }
-        }
-        .task { await loadQuestion() }
-    }
-
-    @ViewBuilder private var contextText: some View {
-        ForEach(sticky.clipBefore, id: \.self) {
-            Text($0).font(BooksStyle.serif(.caption)).foregroundStyle(.secondary)
-        }
-        Text(sticky.marker).font(BooksStyle.serif(.caption)).bold()
-            .padding(.horizontal, 3).padding(.vertical, 1)
-            .background(sticky.color.color.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-        ForEach(sticky.clipAfter, id: \.self) {
-            Text($0).font(BooksStyle.serif(.caption)).foregroundStyle(.secondary)
-        }
-    }
-
-    private func loadQuestion() async {
-        guard AIHelper.isAvailable else { return }
-        loadingQuestion = true
-        aiQuestion = await AIHelper.generateQuestion(
-            marker: sticky.marker,
-            heading: sticky.heading,
-            memo: sticky.memo,
-            clipBefore: sticky.clipBefore,
-            clipAfter: sticky.clipAfter
-        )
-        loadingQuestion = false
-    }
-}
-
-private struct PeelButtonStyle: ButtonStyle {
-    var filled: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.subheadline).bold()
-            .padding(.vertical, 14)
-            .foregroundStyle(filled ? .white : BooksStyle.ink)
-            .background(filled ? BooksStyle.ink : BooksStyle.card, in: Capsule())
-            .opacity(configuration.isPressed ? 0.8 : 1)
+    func peelable(tint: Color, onPeel: @escaping () -> Void) -> some View {
+        PeelableSticky(tint: tint, onPeeled: onPeel) { self }
     }
 }
