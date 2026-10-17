@@ -3,17 +3,37 @@ import SwiftData
 
 struct ShelfView: View {
     @Environment(\.modelContext) private var context
+    @Environment(VaultManager.self) private var vault
     @Query(sort: \Book.createdAt, order: .reverse) private var books: [Book]
     @State private var showAdd = false
     @State private var path: [Book] = []
     @State private var didAutoOpen = false
     @State private var launchCameraBookID: UUID?   // 起動直後にカメラを開く本
+    @State private var query = ""
 
     private let columns = [GridItem(.flexible(), spacing: 22, alignment: .top),
                            GridItem(.flexible(), spacing: 22, alignment: .top)]
 
+    // 全ての本の付箋を、見出し・目印・メモ・色名から検索（A16）。
+    private var matches: [Sticky] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return [] }
+        var out: [Sticky] = []
+        for book in books {
+            for s in book.stickies where !s.mastered {
+                let memo = s.encryptedMemo.flatMap { vault.decrypt($0) } ?? s.memo
+                let hay = [s.heading, s.marker, memo, book.title, AppStore.colorName(s.color)]
+                    .joined(separator: " ").lowercased()
+                if hay.contains(q) { out.append(s) }
+            }
+        }
+        return out.sorted { ($0.book?.title ?? "", $0.pageNumber) < ($1.book?.title ?? "", $1.pageNumber) }
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
+            Group {
+            if query.isEmpty {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 28) {
                     ForEach(books) { book in
@@ -43,7 +63,13 @@ struct ShelfView: View {
                 .padding(.horizontal, 22)
                 .padding(.vertical, 12)
             }
+            } else {
+                SearchResultsList(matches: matches) { book in path = [book] }
+            }
+            }
             .background(BooksStyle.background)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "付箋を検索（見出し・目印・メモ）")
             .navigationTitle("BookMark")
             .navigationDestination(for: Book.self) { book in
                 BookDetailView(
@@ -88,6 +114,45 @@ struct ShelfView: View {
     }
 }
 
+private struct SearchResultsList: View {
+    let matches: [Sticky]
+    var onOpen: (Book) -> Void
+    @Environment(VaultManager.self) private var vault
+
+    var body: some View {
+        if matches.isEmpty {
+            ContentUnavailableView.search
+        } else {
+            List {
+                ForEach(matches) { s in
+                    Button { if let b = s.book { onOpen(b) } } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                RoundedRectangle(cornerRadius: 2).fill(s.color.color).frame(width: 4, height: 16)
+                                Text(s.heading).font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(BooksStyle.ink).lineLimit(1)
+                                Spacer()
+                                Text(AppStore.colorName(s.color))
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(s.color.color.opacity(0.4), in: Capsule())
+                                    .foregroundStyle(BooksStyle.ink)
+                            }
+                            Text(s.marker).font(.caption).foregroundStyle(BooksStyle.subInk).lineLimit(1)
+                            HStack(spacing: 8) {
+                                Text(s.book?.title ?? "本").font(.caption2).foregroundStyle(BooksStyle.subInk)
+                                Text("p.\(s.pageNumber)").font(.caption2).foregroundStyle(BooksStyle.subInk)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+}
+
 private struct BookCard: View {
     let book: Book
     var body: some View {
@@ -123,6 +188,8 @@ private struct AddBookSheet: View {
     @State private var title = ""
     @State private var author = ""
     @State private var isbn = ""
+    @State private var showScanner = false
+    @State private var lookupMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -130,11 +197,22 @@ private struct AddBookSheet: View {
                 Section("本の情報") {
                     TextField("タイトル", text: $title)
                     TextField("著者（任意）", text: $author)
-                    TextField("ISBN（任意・バーコードは本番で）", text: $isbn)
+                    TextField("ISBN（任意）", text: $isbn)
                         .keyboardType(.numbersAndPunctuation)
+                    Button {
+                        showScanner = true
+                    } label: {
+                        Label("バーコードで読み取る", systemImage: "barcode.viewfinder")
+                    }
+                    if let lookupMessage {
+                        Text(lookupMessage).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("本を追加")
+            .sheet(isPresented: $showScanner) {
+                BarcodeScanSheet { code in onScanned(code) }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("キャンセル") { dismiss() }
@@ -149,6 +227,20 @@ private struct AddBookSheet: View {
                         dismiss()
                     }.disabled(title.isEmpty)
                 }
+            }
+        }
+    }
+
+    private func onScanned(_ code: String) {
+        let digits = code.filter { $0.isNumber }
+        isbn = digits
+        lookupMessage = "ISBN \(digits) を読み取りました。書名を照会中…"
+        Task {
+            let info = await BookLookup.fetch(isbn: digits)
+            await MainActor.run {
+                if let t = info?.title, title.isEmpty { title = t }
+                if let a = info?.author, author.isEmpty { author = a }
+                lookupMessage = info?.title != nil ? "書名を自動入力しました" : "書名は見つかりませんでした（手入力できます）"
             }
         }
     }
