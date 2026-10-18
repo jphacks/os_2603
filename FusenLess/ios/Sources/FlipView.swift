@@ -42,12 +42,50 @@ struct FlipView: View {
                     }
                     .tabViewStyle(.page(indexDisplayMode: .always))
                     .indexViewStyle(.page(backgroundDisplayMode: .always))
+                    .overlay { swipeHints }
                     .padding(.bottom, 8)
                 }
             }
             .overlay(alignment: .bottom) { undoToast }
         }
         .animation(.spring(), value: showUndo)
+    }
+
+    /// めくれる方向だけに出す薄い矢印。タップでもその方向へめくれる。
+    /// 矢印のまわり以外はタップを素通りさせ、スワイプや付箋の操作を邪魔しない。
+    private var swipeHints: some View {
+        HStack {
+            hintArrow("chevron.compact.left", label: "前の付箋", enabled: index > 0) {
+                index -= 1
+            }
+            Spacer()
+            hintArrow("chevron.compact.right", label: "次の付箋",
+                      enabled: index < stickies.count - 1) {
+                index += 1
+            }
+        }
+        .padding(.horizontal, 2)
+        .animation(.easeInOut(duration: 0.2), value: index)
+    }
+
+    /// 縦長の矢印（文字の大きさではなく枠で縦横を決める）。押せる範囲は見た目より広くとる。
+    private func hintArrow(_ name: String, label: String, enabled: Bool,
+                           action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.3)) { action() }
+        } label: {
+            Image(systemName: name)
+                .resizable()
+                .fontWeight(.light)
+                .frame(width: 18, height: 72)
+                .foregroundStyle(BooksStyle.subInk.opacity(0.35))
+                .frame(width: 44, height: 110)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(enabled ? 1 : 0)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 
     private func markMastered(_ sticky: Sticky) {
@@ -118,20 +156,12 @@ private struct FlipCard: View {
                 }
                 .font(BooksStyle.serif(.title3)).lineSpacing(8)
 
-                HStack(spacing: 10) {
-                    Circle().fill(sticky.color.color).frame(width: 12, height: 12)
-                    Text(sticky.heading).font(.title3).bold().foregroundStyle(BooksStyle.ink)
-                }
-                .padding(.top, 6)
-
-                if !displayMemo.isEmpty {
-                    Text(displayMemo)
-                        .foregroundStyle(BooksStyle.ink)
-                        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(BooksStyle.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-
+                StickyNoteView(color: sticky.color.color,
+                               heading: sticky.heading,
+                               memo: displayMemo,
+                               seed: sticky.id)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 14)
 
             }
             .padding(.horizontal, 28).padding(.vertical, 24)
@@ -171,5 +201,70 @@ private struct FlipCard: View {
             NotificationScheduler.cancel(stickyID: sticky.id)
             onMastered()
         }
+    }
+}
+
+// 紙の付箋のように見せる（色紙・上のマスキングテープ・少しの傾き・影）。
+private struct StickyNoteView: View {
+    let color: Color
+    let heading: String
+    let memo: String
+    let seed: UUID
+
+    /// 本文はメモ。メモがなければ見出し。
+    private var body_: String { memo.isEmpty ? heading : memo }
+    /// 見出しがメモの書き出しと同じなら二重に出さない（AIの見出しなど違う時だけ下に添える）
+    private var caption: String? {
+        guard !memo.isEmpty, !heading.isEmpty else { return nil }
+        let squashed = memo.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        return squashed.hasPrefix(heading) ? nil : heading
+    }
+    /// 付箋ごとに決まった小さな傾き（-2.5〜2.5度）
+    private var tilt: Double {
+        let v = seed.uuid.0 ^ seed.uuid.7 ^ seed.uuid.15
+        return (Double(v) / 255 - 0.5) * 5
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text(body_)
+                .font(.system(.title3, design: .rounded).weight(.medium))
+                .foregroundStyle(BooksStyle.ink.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .lineSpacing(6)
+                .fixedSize(horizontal: false, vertical: true)
+            if let caption {
+                Text(caption)
+                    .font(.system(.footnote, design: .rounded))
+                    .foregroundStyle(BooksStyle.ink.opacity(0.5))
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 34)
+        .padding(.bottom, 28)
+        .frame(maxWidth: 300, minHeight: 190)
+        .background(
+            ZStack {
+                Color.white
+                color.opacity(0.62)
+                // 紙のわずかな陰影（下ほど少し濃い）
+                LinearGradient(colors: [.white.opacity(0.18), .black.opacity(0.04)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+        )
+        .shadow(color: .black.opacity(0.10), radius: 1, y: 1)
+        .shadow(color: .black.opacity(0.12), radius: 8, x: 2, y: 6)
+        .overlay(alignment: .top) {
+            // マスキングテープ
+            Rectangle()
+                .fill(Color(red: 0.93, green: 0.88, blue: 0.70).opacity(0.75))
+                .frame(width: 96, height: 24)
+                .overlay(Rectangle().stroke(.white.opacity(0.35), lineWidth: 0.5))
+                .rotationEffect(.degrees(-tilt * 0.6))
+                .offset(y: -11)
+                .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
+        }
+        .rotationEffect(.degrees(tilt))
+        .accessibilityElement(children: .combine)
     }
 }
