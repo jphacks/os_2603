@@ -81,7 +81,7 @@ struct BookDetailView: View {
             }
             Button("キャンセル", role: .cancel) {}
         } message: {
-            Text("設定 → BookMark → カメラ をオンにしてください")
+            Text("設定 → FusenLess → カメラ をオンにしてください")
         }
         .fullScreenCover(isPresented: $showFlip) {
             FlipView(
@@ -646,25 +646,12 @@ struct PhotoReaderView: View {
             sticky.reviewStyle = "qa"
             NotificationScheduler.scheduleInitial(for: sticky)
         }
-        sticky.cropImageData = cropRegion(image, normalizedRect: rect)
         localPins[sticky.id] = rect
         AppStore.setLastPage(page, for: book.id)
         AIHelper.improveHeading(for: sticky)
         cancelSelection()
         haptic.impactOccurred()
         onEdit(sticky)
-    }
-
-    private func cropRegion(_ image: UIImage, normalizedRect rect: CGRect) -> Data? {
-        let x = rect.minX * image.size.width
-        let y = rect.minY * image.size.height
-        let w = max(rect.width * image.size.width, 1)
-        let h = max(rect.height * image.size.height, 1)
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = image.scale
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: w, height: h), format: format)
-        let cropped = renderer.image { _ in image.draw(at: CGPoint(x: -x, y: -y)) }
-        return cropped.jpegData(compressionQuality: 0.5)
     }
 
     private func cancelSelection() {
@@ -686,15 +673,6 @@ struct PhotoReaderView: View {
         let texts = wholeLines.map { $0.text }
         let rects = wholeLines.map { $0.rect }
         let markers = activeStickies.filter { localPins[$0.id] == nil }.map { ($0.id, $0.marker) }
-        // Vision照合用に cropData を値としてコピー（SwiftDataオブジェクトは渡さない）
-        let cropDataMap: [UUID: Data] = Dictionary(
-            uniqueKeysWithValues: activeStickies
-                .filter { localPins[$0.id] == nil }
-                .compactMap { s -> (UUID, Data)? in
-                    guard let d = s.cropImageData else { return nil }
-                    return (s.id, d)
-                }
-        )
         let id = UUID()
         matchingID = id
         restoring = true
@@ -714,27 +692,7 @@ struct PhotoReaderView: View {
                                                          onCancel: { worker.cancel() })
             guard !Task.isCancelled, matchingID == id else { return }
 
-            // Phase 2: Vision 特徴量照合（テキスト未一致 + cropData あり）
-            let unmatchedIDs = markers.filter { pins[$0.0] == nil && cropDataMap[$0.0] != nil }.map { $0.0 }
-            if !unmatchedIDs.isEmpty, let cgImg = image.cgImage {
-                let vWorker = Task.detached(priority: .userInitiated) { () -> [UUID: CGRect] in
-                    var vPins: [UUID: CGRect] = [:]
-                    for stickyID in unmatchedIDs {
-                        guard !Task.isCancelled, let cropData = cropDataMap[stickyID] else { continue }
-                        if #available(iOS 13, *),
-                           let rect = findByImageFeature(cropData: cropData, fullCGImage: cgImg) {
-                            vPins[stickyID] = rect
-                        }
-                    }
-                    return vPins
-                }
-                let vPins = await withTaskCancellationHandler(operation: { await vWorker.value },
-                                                              onCancel: { vWorker.cancel() })
                 guard !Task.isCancelled, matchingID == id else { return }
-                pins.merge(vPins) { existing, _ in existing }
-            }
-
-            guard !Task.isCancelled, matchingID == id else { return }
             cachedPins = pins
             restoring = false
             matchingTask = nil
@@ -850,12 +808,7 @@ struct StickyRow: View {
                     .padding(.horizontal, 2)
                     .background(sticky.color.color.opacity(0.35))
                     .lineLimit(2)
-                if let data = sticky.cropImageData, let uiImg = UIImage(data: data) {
-                    Image(uiImage: uiImg)
-                        .resizable().scaledToFit()
-                        .frame(maxHeight: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
+
                 if !displayMemo.isEmpty {
                     Text("📝 \(displayMemo)").font(.caption).foregroundStyle(BooksStyle.subInk)
                 }
@@ -1074,15 +1027,29 @@ struct CameraPicker: View {
     var onImage: (UIImage?) -> Void
 
     @StateObject private var camera = CameraService()
+    @State private var zoomBase: CGFloat = 1
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             CameraPreviewLayer(session: camera.session)
                 .ignoresSafeArea()
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { v in camera.setZoom(zoomBase * v.magnification) }
+                        .onEnded { v in zoomBase = camera.zoom }
+                )
 
             VStack {
                 Spacer()
+
+                if camera.zoom > 1.05 {
+                    Text(String(format: "%.1fx", camera.zoom))
+                        .font(.caption.bold()).foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(.black.opacity(0.5), in: Capsule())
+                        .padding(.bottom, 8)
+                }
 
                 HStack {
                     Button { onImage(nil) } label: {
@@ -1124,8 +1091,10 @@ struct CameraPicker: View {
 final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate {
     let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
+    private(set) var device: AVCaptureDevice?
     var onCaptured: ((UIImage) -> Void)?
     @Published var capturing = false
+    @Published var zoom: CGFloat = 1
     private var configured = false
 
     func start() {
@@ -1138,8 +1107,8 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         configured = true
         session.beginConfiguration()
         session.sessionPreset = .photo
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              let input = try? AVCaptureDeviceInput(device: device),
+        guard let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              let input = try? AVCaptureDeviceInput(device: dev),
               session.canAddInput(input), session.canAddOutput(output) else {
             session.commitConfiguration()
             return
@@ -1147,6 +1116,7 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         session.addInput(input)
         session.addOutput(output)
         session.commitConfiguration()
+        device = dev
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             session.startRunning()
         }
@@ -1179,6 +1149,15 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             capturing = false
             onCaptured?(image)
         }
+    }
+
+    func setZoom(_ factor: CGFloat) {
+        guard let device else { return }
+        let clamped = min(max(factor, 1), min(device.activeFormat.videoMaxZoomFactor, 10))
+        try? device.lockForConfiguration()
+        device.videoZoomFactor = clamped
+        device.unlockForConfiguration()
+        DispatchQueue.main.async { self.zoom = clamped }
     }
 
     deinit { if session.isRunning { session.stopRunning() } }

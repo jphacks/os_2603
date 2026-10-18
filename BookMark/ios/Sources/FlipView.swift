@@ -105,13 +105,6 @@ private struct FlipCard: View {
                 Text("p.\(sticky.pageNumber)")
                     .font(.subheadline).bold().foregroundStyle(BooksStyle.subInk)
 
-                if let data = sticky.cropImageData, let uiImg = UIImage(data: data) {
-                    Image(uiImage: uiImg)
-                        .resizable().scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
-                }
-
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(sticky.clipBefore, id: \.self) {
                         Text($0).foregroundStyle(BooksStyle.subInk)
