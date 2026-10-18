@@ -81,8 +81,15 @@ private struct ReviewCard: View {
     @State private var loadingQuestion = false
 
     private var displayMemo: String {
-        if let data = sticky.encryptedMemo { return vault.decrypt(data) ?? "" }
-        return sticky.memo
+        let raw: String
+        if let data = sticky.encryptedMemo { raw = vault.decrypt(data) ?? "" }
+        else { raw = sticky.memo }
+        // 末尾の ? / ？ は復習トリガー用なので表示しない
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("?") || trimmed.hasSuffix("？") {
+            trimmed = String(trimmed.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
     }
 
     private var style: String { sticky.reviewStyle ?? "default" }
@@ -132,7 +139,7 @@ private struct ReviewCard: View {
 
     private var headerText: String {
         switch style {
-        case "qa":    return "p.\(sticky.pageNumber) · Q&A"
+        case "qa":    return "p.\(sticky.pageNumber) · この内容覚えた？"
         case "vocab": return "p.\(sticky.pageNumber) · 単語"
         default:      return "p.\(sticky.pageNumber) · \(aiQuestion ?? "ここ、何の話だった？")"
         }
@@ -140,8 +147,24 @@ private struct ReviewCard: View {
 
     @ViewBuilder private var questionBody: some View {
         if style == "qa" {
-            Text(sticky.marker)
-                .font(BooksStyle.serif(.body)).lineSpacing(6)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(sticky.marker)
+                    .font(BooksStyle.serif(.body)).lineSpacing(6)
+                    .padding(.horizontal, 3).padding(.vertical, 1)
+                    .background(sticky.color.color.opacity(0.3))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                if !sticky.clipBefore.isEmpty || !sticky.clipAfter.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let before = sticky.clipBefore.last {
+                            Text(before).foregroundStyle(.secondary)
+                        }
+                        if let after = sticky.clipAfter.first {
+                            Text(after).foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
         } else if style == "vocab" {
             VStack(alignment: .leading, spacing: 6) {
                 Text(sticky.heading)

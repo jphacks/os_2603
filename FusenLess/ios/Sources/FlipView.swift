@@ -89,8 +89,7 @@ struct FlipView: View {
     }
 
     private func markMastered(_ sticky: Sticky) {
-        sticky.mastered = true
-        sticky.masteredAt = .now
+        sticky.deletedAt = .now
         onMastered(sticky)
         undoTarget = sticky
         withAnimation { showUndo = true }
@@ -103,10 +102,10 @@ struct FlipView: View {
     @ViewBuilder private var undoToast: some View {
         if showUndo, let s = undoTarget {
             HStack(spacing: 12) {
-                Text("覚えました")
+                Text("付箋を剥がしました")
                 Spacer()
                 Button("元に戻す") {
-                    s.mastered = false; s.masteredAt = nil
+                    s.deletedAt = nil
                     withAnimation { showUndo = false }
                 }
                 .bold()
