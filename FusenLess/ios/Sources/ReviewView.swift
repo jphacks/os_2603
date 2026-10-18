@@ -1,217 +1,349 @@
 import SwiftUI
+import SwiftData
 
-// 復習モード: 答えを見て、もう一度 or 次へ or 付箋を剥がす。
-
+// 思い出すきっかけを示し、実物の教科書へ戻るための画面。
+// 「読み直した」は mastered（覚えた）と独立して保存する。
 struct ReviewView: View {
+    @Environment(\.modelContext) private var context
     let stickies: [Sticky]
     var onClose: () -> Void
 
     @State private var deck: [Sticky] = []
     @State private var index = 0
-    @State private var showAnswer = false
+    @State private var didStart = false
+    @State private var showReadingList = false
+    @State private var bookCheck: BookReviewTarget?
+    @State private var saveError: String?
+
+    private var available: [Sticky] {
+        stickies.filter { $0.deletedAt == nil && $0.placed && !$0.mastered }
+    }
+    private var pending: [Sticky] {
+        available.filter { $0.needsBookReview }
+            .sorted { ($0.pageNumber, $0.order) < ($1.pageNumber, $1.order) }
+    }
 
     var body: some View {
         ZStack {
             BooksStyle.background.ignoresSafeArea()
-            VStack {
-                HStack {
-                    BooksCloseButton { onClose() }
-                    Spacer()
-                    if !deck.isEmpty {
-                        Text("\(min(index + 1, deck.count)) / \(deck.count)")
-                            .font(.footnote).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                header
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        if deck.isEmpty {
+                            emptyState
+                        } else if index >= deck.count {
+                            sessionEnd
+                        } else {
+                            card(deck[index])
+                        }
                     }
+                    .padding(20)
+                    .frame(maxWidth: 600)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, 18).padding(.top, 12)
-
-                Spacer()
-                content
-                Spacer()
             }
         }
-        .onAppear { if deck.isEmpty { deck = stickies.filter { $0.reviewEnabled }.shuffled() } }
+        .onAppear {
+            guard !didStart else { return }
+            didStart = true
+            startSession()
+        }
+        .sheet(item: $bookCheck) { target in
+            BookReviewSheet(sticky: target.sticky, onRead: {
+                guard recordRead(target.sticky) else { return }
+                bookCheck = nil
+                if target.advanceAfterReading, index < deck.count,
+                   deck[index].id == target.sticky.id { index += 1 }
+            }, onLater: {
+                bookCheck = nil
+                if target.advanceAfterReading, index < deck.count,
+                   deck[index].id == target.sticky.id { index += 1 }
+            })
+        }
+        .sheet(isPresented: $showReadingList) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text("本を開いて確認したい付箋")
+                            .font(.title2.bold()).foregroundStyle(BooksStyle.ink)
+                        if pending.isEmpty {
+                            Text("あとで確認する付箋はありません")
+                                .foregroundStyle(BooksStyle.subInk)
+                        } else {
+                            readingList
+                        }
+                    }.padding(20)
+                }
+                .background(BooksStyle.background)
+                .navigationTitle("あとで教科書で確認")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("閉じる") { showReadingList = false }
+                    }
+                }
+            }
+        }
+        .alert("記録を保存できませんでした", isPresented: Binding(
+            get: { saveError != nil }, set: { if !$0 { saveError = nil } }
+        )) {
+            Button("閉じる", role: .cancel) { saveError = nil }
+        } message: {
+            Text(saveError ?? "もう一度お試しください")
+        }
     }
 
-    @ViewBuilder private var content: some View {
-        if deck.isEmpty {
-            VStack(spacing: 10) {
-                Text("📚").font(.system(size: 40))
-                Text("復習対象の付箋がありません").foregroundStyle(.secondary)
-                Text("付箋のメモ末尾に ? をつけると復習対象になります")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+    private var header: some View {
+        HStack(spacing: 12) {
+            BooksCloseButton { onClose() }
+            Spacer()
+            Button { showReadingList = true } label: {
+                Label("あとで \(pending.count)", systemImage: "book.closed")
+                    .font(.subheadline.weight(.semibold))
             }
-        } else if index >= deck.count {
-            VStack(spacing: 16) {
-                Text("🎉").font(.system(size: 40))
-                Text("今回の復習おわり！")
-                    .font(.title3.bold()).foregroundStyle(BooksStyle.ink)
-                Text("おつかれさまでした")
+            .foregroundStyle(BooksStyle.ink)
+            .accessibilityLabel("あとで教科書で確認する付箋、\(pending.count)枚")
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+    }
+
+    private func card(_ sticky: Sticky) -> some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack {
+                Text("付箋を振り返る").font(.title2.bold())
+                Spacer()
+                Text("\(index + 1) / \(deck.count)")
+                    .font(.subheadline.monospacedDigit()).foregroundStyle(BooksStyle.subInk)
+            }
+            Text(sticky.book?.title ?? "本の付箋")
+                .font(.subheadline).foregroundStyle(BooksStyle.subInk)
+            ProgressView(value: Double(index), total: Double(max(deck.count, 1)))
+                .tint(BooksStyle.ink)
+                .accessibilityLabel("振り返りの進捗")
+
+            Text("ここに付箋を貼った理由、思い出せますか？")
+                .font(.subheadline).foregroundStyle(BooksStyle.subInk)
+            Text(sticky.heading).font(.title2.bold()).foregroundStyle(BooksStyle.ink)
+            BookReviewClue(sticky: sticky)
+            if let date = sticky.lastBookReviewAt {
+                Text("前に教科書で確認した日：\(date.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption).foregroundStyle(BooksStyle.subInk)
+            }
+
+            VStack(spacing: 12) {
+                Button {
+                    guard queue(sticky) else { return }
+                    bookCheck = BookReviewTarget(sticky: sticky, advanceAfterReading: true)
+                } label: {
+                    Label("教科書で確認する", systemImage: "book")
+                        .frame(maxWidth: .infinity)
+                }.buttonStyle(CaptureButton())
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { nextActions(sticky) }
+                    VStack(spacing: 12) { nextActions(sticky) }
+                }
+            }
+            Text("分からないところは、本の本文や図を読み直しましょう。")
+                .font(.caption).foregroundStyle(BooksStyle.subInk)
+        }
+    }
+
+    @ViewBuilder private func nextActions(_ sticky: Sticky) -> some View {
+        Button {
+            guard queue(sticky) else { return }
+            index += 1
+        } label: {
+            Text("あとで確認").frame(maxWidth: .infinity)
+        }.buttonStyle(CaptureButton(ghost: true))
+        Button { index += 1 } label: {
+            Text("次の付箋へ").frame(maxWidth: .infinity)
+        }.buttonStyle(CaptureButton(ghost: true))
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("振り返る付箋がありません", systemImage: "bookmark")
+        } description: {
+            Text("付箋の編集画面で「復習対象にする」をオンにすると、ここに表示されます。")
+        }
+    }
+
+    private var sessionEnd: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Text("次に教科書を開くところ").font(.title2.bold())
+            Text("\(deck.count)枚の付箋を振り返りました。")
+                .foregroundStyle(BooksStyle.subInk)
+            if pending.isEmpty {
+                Text("あとで確認する付箋は残っていません。")
+            } else {
+                Text("読み直したい付箋が\(pending.count)枚あります。\n本が手元になくても、一覧は次回まで残ります。")
                     .foregroundStyle(BooksStyle.subInk)
-                Button("もう一度") {
-                    deck = stickies.filter { $0.reviewEnabled }.shuffled()
-                    index = 0; showAnswer = false
-                }
-                .buttonStyle(CaptureButton()).frame(width: 160)
+                readingList
             }
-        } else {
-            ReviewCard(
-                sticky: deck[index],
-                showAnswer: $showAnswer,
-                onNext: { showAnswer = false; index += 1 },
-                onAgain: {
-                    deck.append(deck[index])
-                    showAnswer = false
-                    index += 1
+            Button { startSession() } label: {
+                Text("もう一度振り返る").frame(maxWidth: .infinity)
+            }.buttonStyle(CaptureButton(ghost: true))
+            Button("閉じる") { onClose() }
+                .frame(maxWidth: .infinity).padding(.vertical, 10)
+        }
+    }
+
+    private var readingList: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(pending) { sticky in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(sticky.book?.title ?? "本の付箋")
+                        .font(.caption).foregroundStyle(BooksStyle.subInk)
+                    Text("\(BookReviewText.page(sticky.pageNumber)) · \(sticky.heading)")
+                        .font(.headline).foregroundStyle(BooksStyle.ink)
+                    // 同時に複数シートを開かず、一覧内でそのまま本に戻る案内をする。
+                    Text("このページの本文・図を読み直してください。")
+                        .font(.caption).foregroundStyle(BooksStyle.subInk)
+                    Button("教科書で確認した") { _ = recordRead(sticky) }
+                        .font(.subheadline.weight(.semibold))
+                    Divider()
                 }
-            )
+            }
+        }
+    }
+
+    private func startSession() {
+        deck = available.filter { $0.reviewEnabled || $0.needsBookReview }
+            .sorted {
+                if $0.needsBookReview != $1.needsBookReview { return $0.needsBookReview }
+                return ($0.pageNumber, $0.order) < ($1.pageNumber, $1.order)
+            }
+        index = 0
+    }
+
+    private func queue(_ sticky: Sticky) -> Bool {
+        let wasPending = sticky.needsBookReview
+        sticky.requestBookReview()
+        do { try context.save(); return true }
+        catch {
+            sticky.needsBookReview = wasPending
+            saveError = "確認したいページの記録を保存できませんでした。もう一度お試しください。"
+            return false
+        }
+    }
+
+    private func recordRead(_ sticky: Sticky) -> Bool {
+        let wasPending = sticky.needsBookReview
+        let previousDate = sticky.lastBookReviewAt
+        sticky.recordBookReview()
+        do { try context.save(); return true }
+        catch {
+            sticky.needsBookReview = wasPending
+            sticky.lastBookReviewAt = previousDate
+            saveError = "読み直した記録を保存できませんでした。もう一度お試しください。"
+            return false
         }
     }
 }
 
-// MARK: - 1枚のカード
-
-private struct ReviewCard: View {
+private struct BookReviewTarget: Identifiable {
+    var id: UUID { sticky.id }
     let sticky: Sticky
-    @Binding var showAnswer: Bool
-    var onNext: () -> Void
-    var onAgain: () -> Void
-    @Environment(VaultManager.self) private var vault
+    let advanceAfterReading: Bool
+}
 
-    @State private var aiQuestion: String?
-    @State private var loadingQuestion = false
-
-    private var displayMemo: String {
-        let raw: String
-        if let data = sticky.encryptedMemo { raw = vault.decrypt(data) ?? "" }
-        else { raw = sticky.memo }
-        // 末尾の ? / ？ は復習トリガー用なので表示しない
-        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        while trimmed.hasSuffix("?") || trimmed.hasSuffix("？") {
-            trimmed = String(trimmed.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return trimmed
-    }
-
-    private var style: String { sticky.reviewStyle ?? "default" }
+private struct BookReviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let sticky: Sticky
+    var onRead: () -> Void
+    var onLater: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(headerText)
-                .font(.headline).foregroundStyle(BooksStyle.ink)
-
-            questionBody
-
-            if showAnswer {
-                Divider().padding(.vertical, 2)
-                answerBody
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("教科書を開く").font(.subheadline).foregroundStyle(BooksStyle.subInk)
+                    Text(sticky.book?.title ?? "本の付箋")
+                        .font(.title2.bold()).foregroundStyle(BooksStyle.ink)
+                    Text(BookReviewText.page(sticky.pageNumber))
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundStyle(BooksStyle.ink)
+                    Text(sticky.heading).font(.title3.bold())
+                    BookReviewClue(sticky: sticky)
+                    Text("本文や図を読み直し、必要なら紙のノートに自分の言葉で書き直してみましょう。")
+                        .foregroundStyle(BooksStyle.subInk)
+                    Button(action: onRead) {
+                        Text("教科書で確認した").frame(maxWidth: .infinity)
+                    }.buttonStyle(CaptureButton())
+                    Button("今は本がないので、あとで確認する", action: onLater)
+                        .font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 8)
+                }.padding(24)
             }
-
-            HStack(spacing: 10) {
-                if showAnswer {
-                    Button {
-                        onAgain()
-                    } label: { Text("もう一度").frame(maxWidth: .infinity) }
-                        .buttonStyle(CaptureButton(ghost: true))
-                    Button {
-                        onNext()
-                    } label: { Text("次へ").frame(maxWidth: .infinity) }
-                        .buttonStyle(CaptureButton())
-                } else {
-                    Button { showAnswer = true } label: {
-                        Text(loadingQuestion ? "問題生成中…" : "答えを見る").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(CaptureButton())
-                    .disabled(loadingQuestion)
+            .background(BooksStyle.background)
+            .navigationTitle("教科書で確認")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") { dismiss() }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.top, 6)
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BooksStyle.card)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .padding(.horizontal, 16)
-        .task(id: sticky.id) {
-            if style == "default" { await loadQuestion() }
         }
     }
+}
 
-    private var headerText: String {
-        switch style {
-        case "qa":    return "p.\(sticky.pageNumber) · この内容覚えた？"
-        case "vocab": return "p.\(sticky.pageNumber) · 単語"
-        default:      return "p.\(sticky.pageNumber) · \(aiQuestion ?? "ここ、何の話だった？")"
-        }
-    }
+private struct BookReviewClue: View {
+    @Environment(VaultManager.self) private var vault
+    let sticky: Sticky
+    @State private var memo = ""
 
-    @ViewBuilder private var questionBody: some View {
-        if style == "qa" {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(sticky.marker)
-                    .font(BooksStyle.serif(.body)).lineSpacing(6)
-                    .padding(.horizontal, 3).padding(.vertical, 1)
-                    .background(sticky.color.color.opacity(0.3))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                if !sticky.clipBefore.isEmpty || !sticky.clipAfter.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let before = sticky.clipBefore.last {
-                            Text(before).foregroundStyle(.secondary)
-                        }
-                        if let after = sticky.clipAfter.first {
-                            Text(after).foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.caption)
-                }
-            }
-        } else if style == "vocab" {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(sticky.heading)
-                    .font(.title3.bold()).foregroundStyle(BooksStyle.ink)
-                Text("この言葉の意味は？")
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("\(BookReviewText.page(sticky.pageNumber)) の目印")
                     .font(.caption).foregroundStyle(BooksStyle.subInk)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                if let before = sticky.clipBefore.last {
-                    Text(before).foregroundStyle(.primary)
+                if let data = sticky.cropImageData, let image = UIImage(data: data) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                        .frame(maxHeight: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel("付箋を貼った部分の切り抜き")
                 }
-                Text(sticky.marker).bold()
-                    .padding(.horizontal, 3).padding(.vertical, 1)
-                    .background(sticky.color.color.opacity(0.45))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                if let after = sticky.clipAfter.first {
-                    Text(after).foregroundStyle(.primary)
+                if !sticky.marker.isEmpty && sticky.marker != "(図)" {
+                    Text(sticky.marker).font(BooksStyle.serif(.body)).lineSpacing(5).lineLimit(4)
+                    DisclosureGroup("原文と前後の文章を開く") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(sticky.clipBefore.joined(separator: "\n")).foregroundStyle(BooksStyle.subInk)
+                            Text(sticky.marker)
+                            Text(sticky.clipAfter.joined(separator: "\n")).foregroundStyle(BooksStyle.subInk)
+                        }.font(BooksStyle.serif(.subheadline)).padding(.top, 8)
+                    }.font(.caption)
                 }
             }
-            .font(BooksStyle.serif(.body)).lineSpacing(6)
-        }
-    }
-
-    @ViewBuilder private var answerBody: some View {
-        if style == "vocab" {
-            Text(sticky.marker)
-                .font(BooksStyle.serif(.body)).lineSpacing(6)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(sticky.heading).font(.headline)
-                if !displayMemo.isEmpty {
-                    Text(displayMemo).foregroundStyle(.secondary)
+            if !memo.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("自分が残したメモ").font(.caption).foregroundStyle(BooksStyle.subInk)
+                    Text(memo).font(.body).textSelection(.enabled)
                 }
             }
         }
+        .padding(18)
+        .background(sticky.color.color.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
+        .task(id: sticky.id) {
+            let text: String
+            if let data = sticky.encryptedMemo {
+                text = vault.decrypt(data) ?? ""
+            } else { text = sticky.memo }
+            memo = BookReviewText.memo(text)
+        }
     }
+}
 
-    private func loadQuestion() async {
-        guard AIHelper.isAvailable else { return }
-        loadingQuestion = true
-        aiQuestion = await AIHelper.generateQuestion(
-            marker: sticky.marker,
-            heading: sticky.heading,
-            memo: displayMemo,
-            clipBefore: sticky.clipBefore,
-            clipAfter: sticky.clipAfter)
-        loadingQuestion = false
+// 表示に使うメモから、以前の復習対象指定用の末尾 ? だけを取り除く。
+enum BookReviewText {
+    static func memo(_ text: String) -> String {
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while result.hasSuffix("?") || result.hasSuffix("？") {
+            result = String(result.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
+    static func page(_ number: Int) -> String {
+        number > 0 ? "p.\(number)" : "ページ番号を確認してください"
     }
 }

@@ -65,6 +65,9 @@ final class Sticky {
     var cropImageData: Data? = nil
     var nextReviewDate: Date? = nil
     var reviewInterval: Int = 1
+    // 教科書での再確認。暗記済みフラグとは独立した記録。
+    var needsBookReview: Bool = false
+    var lastBookReviewAt: Date? = nil
     // ソフトデリート。nil = 未削除。30日後に自動で完全削除。
     var deletedAt: Date? = nil
     // ピン位置（正規化座標 0〜1）。OCRマッチ失敗時のフォールバックに使う。
@@ -120,6 +123,15 @@ final class Sticky {
             pinW = newValue.map { Double($0.width) }
             pinH = newValue.map { Double($0.height) }
         }
+    }
+
+    func requestBookReview() {
+        needsBookReview = true
+    }
+
+    func recordBookReview(at date: Date = .now) {
+        needsBookReview = false
+        lastBookReviewAt = date
     }
 
     static func makeHeading(memo: String, marker: String) -> String {
