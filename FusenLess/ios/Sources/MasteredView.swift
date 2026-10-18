@@ -9,7 +9,7 @@ struct MasteredView: View {
 
     private var mastered: [Sticky] {
         book.stickies
-            .filter { $0.mastered }
+            .filter { $0.mastered && $0.deletedAt == nil }
             .sorted { ($0.masteredAt ?? $0.createdAt) > ($1.masteredAt ?? $1.createdAt) }
     }
 

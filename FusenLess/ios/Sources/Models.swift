@@ -65,6 +65,13 @@ final class Sticky {
     var cropImageData: Data? = nil
     var nextReviewDate: Date? = nil
     var reviewInterval: Int = 1
+    // ソフトデリート。nil = 未削除。30日後に自動で完全削除。
+    var deletedAt: Date? = nil
+    // ピン位置（正規化座標 0〜1）。OCRマッチ失敗時のフォールバックに使う。
+    var pinX: Double? = nil
+    var pinY: Double? = nil
+    var pinW: Double? = nil
+    var pinH: Double? = nil
     var book: Book?
 
     init(pageNumber: Int, placed: Bool, marker: String,
@@ -89,12 +96,30 @@ final class Sticky {
         self.cropImageData = nil
         self.nextReviewDate = nil
         self.reviewInterval = 1
+        self.deletedAt = nil
+        self.pinX = nil
+        self.pinY = nil
+        self.pinW = nil
+        self.pinH = nil
         self.book = book
     }
 
     var color: StickyColor {
         get { StickyColor(rawValue: colorRaw) ?? .yellow }
         set { colorRaw = newValue.rawValue }
+    }
+
+    var savedPinRect: CGRect? {
+        get {
+            guard let x = pinX, let y = pinY, let w = pinW, let h = pinH else { return nil }
+            return CGRect(x: x, y: y, width: w, height: h)
+        }
+        set {
+            pinX = newValue.map { Double($0.origin.x) }
+            pinY = newValue.map { Double($0.origin.y) }
+            pinW = newValue.map { Double($0.width) }
+            pinH = newValue.map { Double($0.height) }
+        }
     }
 
     static func makeHeading(memo: String, marker: String) -> String {

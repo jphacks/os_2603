@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AVFoundation
 
 struct ShelfView: View {
     @Environment(\.modelContext) private var context
@@ -7,10 +8,13 @@ struct ShelfView: View {
     @Query(sort: \Book.createdAt, order: .reverse) private var books: [Book]
     @State private var showAdd = false
     @State private var path: [Book] = []
-    @State private var didAutoOpen = false
-    @State private var query = ""
+@State private var query = ""
     @State private var editMode = false
     @State private var deleteTarget: Book?
+    @State private var showQuickCamera = false
+    @State private var quickPhoto: UIImage?
+    @State private var showBookPicker = false
+    @State private var showCameraAlert = false
 
     private let columns = [GridItem(.flexible(), spacing: 22, alignment: .top),
                            GridItem(.flexible(), spacing: 22, alignment: .top)]
@@ -21,7 +25,7 @@ struct ShelfView: View {
         guard !q.isEmpty else { return [] }
         var out: [Sticky] = []
         for book in books {
-            for s in book.stickies where !s.mastered {
+            for s in book.stickies where !s.mastered && s.deletedAt == nil {
                 let memo = s.encryptedMemo.flatMap { vault.decrypt($0) } ?? s.memo
                 let hay = [s.heading, s.marker, memo, book.title, AppStore.colorName(s.color)]
                     .joined(separator: " ").lowercased()
@@ -36,6 +40,26 @@ struct ShelfView: View {
             Group {
             if query.isEmpty {
             ScrollView {
+                // 撮影ボタン（先に撮って後から教科書を選ぶ）
+                Button {
+                    let status = AVCaptureDevice.authorizationStatus(for: .video)
+                    if status == .denied || status == .restricted {
+                        showCameraAlert = true
+                    } else {
+                        showQuickCamera = true
+                    }
+                } label: {
+                    Label("カメラで撮る", systemImage: "camera.fill")
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .foregroundStyle(.white)
+                        .background(BooksStyle.ink, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 22)
+                .padding(.top, 8)
+
                 LazyVGrid(columns: columns, spacing: 28) {
                     ForEach(books) { book in
                         if editMode {
@@ -120,12 +144,40 @@ struct ShelfView: View {
             .sheet(isPresented: $showAdd) {
                 AddBookSheet()
             }
-            .onAppear {
-                seedIfEmpty()
-                autoOpenLastBook()
+            .fullScreenCover(isPresented: $showQuickCamera) {
+                CameraPicker { img in
+                    showQuickCamera = false
+                    if let img {
+                        quickPhoto = img
+                        showBookPicker = true
+                    }
+                }
+                .ignoresSafeArea()
             }
-            // 初回起動はサンプルの本が入ってから開く
-            .onChange(of: books.count) { _, _ in autoOpenLastBook() }
+            .sheet(isPresented: $showBookPicker) {
+                BookPickerSheet(books: books) { book in
+                    showBookPicker = false
+                    path = [book]
+                    // BookDetailViewに写真を渡すためNotificationCenterを使用
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        NotificationCenter.default.post(
+                            name: .quickPhotoTaken,
+                            object: quickPhoto)
+                        quickPhoto = nil
+                    }
+                }
+            }
+            .alert("カメラへのアクセスが許可されていません", isPresented: $showCameraAlert) {
+                Button("設定を開く") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("設定 → FusenLess → カメラ をオンにしてください")
+            }
+            .onAppear { seedIfEmpty() }
         }
     }
 
@@ -135,14 +187,6 @@ struct ShelfView: View {
         context.insert(Book(title: "アルゴリズムとデータ構造 入門", author: "佐藤"))
     }
 
-    // 起動時、前回開いた本（なければ一番新しい本）を開く。
-    private func autoOpenLastBook() {
-        guard !didAutoOpen else { return }
-        let last = AppStore.lastBookId.flatMap { id in books.first { $0.id.uuidString == id } }
-        guard let book = last ?? books.first else { return }
-        didAutoOpen = true
-        path = [book]
-    }
 }
 
 private struct SearchResultsList: View {
@@ -199,8 +243,9 @@ private struct BookCard: View {
             Text(book.author ?? "著者不明")
                 .font(.caption).foregroundStyle(BooksStyle.subInk)
                 .lineLimit(1)
-            let active = book.stickies.filter { !$0.mastered }.count
-            let mastered = book.stickies.filter { $0.mastered }.count
+            let alive = book.stickies.filter { $0.deletedAt == nil }
+            let active = alive.filter { !$0.mastered }.count
+            let mastered = alive.filter { $0.mastered }.count
             HStack(spacing: 4) {
                 Text("付箋 \(active)").font(.caption).bold()
                     .foregroundStyle(BooksStyle.ink)
@@ -272,6 +317,51 @@ private struct AddBookSheet: View {
                 if let t = info?.title, title.isEmpty { title = t }
                 if let a = info?.author, author.isEmpty { author = a }
                 lookupMessage = info?.title != nil ? "書名を自動入力しました" : "書名は見つかりませんでした（手入力できます）"
+            }
+        }
+    }
+}
+
+// MARK: - 教科書選択シート（カメラ先撮りフロー用）
+
+extension Notification.Name {
+    static let quickPhotoTaken = Notification.Name("quickPhotoTaken")
+}
+
+private struct BookPickerSheet: View {
+    let books: [Book]
+    var onPick: (Book) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(books) { book in
+                    Button {
+                        onPick(book)
+                    } label: {
+                        HStack(spacing: 12) {
+                            BookCoverView(book: book, titleFont: .system(size: 10, weight: .bold))
+                                .frame(width: 40)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(book.title).font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(BooksStyle.ink)
+                                if let author = book.author {
+                                    Text(author).font(.caption).foregroundStyle(BooksStyle.subInk)
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle("教科書を選択")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") { dismiss() }
+                }
             }
         }
     }

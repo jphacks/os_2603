@@ -21,15 +21,21 @@ struct BookDetailView: View {
     @State private var showCameraAlert = false
     @State private var undoSticky: Sticky?
     @State private var showUndo = false
+    @State private var showStickySheet = false
+
+    private var alive: [Sticky] { book.stickies.filter { $0.deletedAt == nil } }
+    private var deletedStickies: [Sticky] {
+        book.stickies.filter { $0.deletedAt != nil }
+            .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
+    }
 
     private var placed: [Sticky] {
-        book.stickies
-            .filter { $0.placed && !$0.mastered }
+        alive.filter { $0.placed && !$0.mastered }
             .sorted { ($0.pageNumber, $0.order) < ($1.pageNumber, $1.order) }
     }
 
-    private var masteredCount: Int { book.stickies.filter { $0.mastered }.count }
-    private var totalPlaced: Int { book.stickies.filter { $0.placed }.count }
+    private var masteredCount: Int { alive.filter { $0.mastered }.count }
+    private var totalPlaced: Int { alive.filter { $0.placed }.count }
 
     // ページごとの付箋グループ（小口ビューからのスクロール用）
     private var placedByPage: [(page: Int, stickies: [Sticky])] {
@@ -39,7 +45,7 @@ struct BookDetailView: View {
 
     // 位置未定のメモ（A5：写真なしで先に残したメモ）
     private var unplacedMemos: [Sticky] {
-        book.stickies.filter { !$0.placed && !$0.mastered }
+        alive.filter { !$0.placed && !$0.mastered }
             .sorted { $0.pageNumber < $1.pageNumber }
     }
 
@@ -60,6 +66,14 @@ struct BookDetailView: View {
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
+        .sheet(isPresented: $showStickySheet) {
+            StickyListSheet(
+                placedByPage: placedByPage,
+                deletedStickies: deletedStickies,
+                onEdit: { editing = $0 },
+                onMastered: { markMastered($0) })
+            .presentationDetents([.medium, .large])
+        }
         .sheet(isPresented: $showMastered) {
             MasteredView(book: book)
         }
@@ -96,13 +110,25 @@ struct BookDetailView: View {
                 onClose: { showReview = false })
         }
         .onChange(of: pickerItem) { _, newItem in loadPicked(newItem) }
-        .onAppear { AppStore.lastBookId = book.id.uuidString }
+        .onAppear { purgeExpiredStickies() }
+        .onReceive(NotificationCenter.default.publisher(for: .quickPhotoTaken)) { note in
+            if let img = note.object as? UIImage { setPhoto(img) }
+        }
         .overlay(alignment: .bottom) { undoToast }
     }
 
+    // 30日以上前に削除された付箋を完全削除
+    private func purgeExpiredStickies() {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .distantPast
+        for s in book.stickies where s.deletedAt != nil {
+            if let deleted = s.deletedAt, deleted < cutoff {
+                context.delete(s)
+            }
+        }
+    }
+
     private func markMastered(_ sticky: Sticky) {
-        sticky.mastered = true
-        sticky.masteredAt = .now
+        sticky.deletedAt = .now
         undoSticky = sticky
         withAnimation { showUndo = true }
         Task {
@@ -116,11 +142,11 @@ struct BookDetailView: View {
     @ViewBuilder private var undoToast: some View {
         if showUndo, let s = undoSticky {
             HStack(spacing: 12) {
-                Text("覚えました")
+                Text("付箋を剥がしました")
                     .font(.subheadline)
                 Spacer()
                 Button("元に戻す") {
-                    s.mastered = false; s.masteredAt = nil
+                    s.deletedAt = nil
                     withAnimation { showUndo = false }
                 }
                 .font(.subheadline).bold()
@@ -218,7 +244,7 @@ struct BookDetailView: View {
                     }
                 }
 
-                // 付箋数・覚えた数
+                // 付箋数・パラパラ・復習・付箋一覧ボタン
                 if totalPlaced > 0 {
                     HStack {
                         Text("付箋 \(totalPlaced) 枚中 \(masteredCount) 枚を覚えた")
@@ -231,8 +257,11 @@ struct BookDetailView: View {
                     }
                 }
 
-                // パラパラ・復習
                 HStack(spacing: 10) {
+                    Button { showStickySheet = true } label: {
+                        Label("付箋一覧 \(totalPlaced)", systemImage: "list.bullet")
+                            .frame(maxWidth: .infinity)
+                    }
                     Button { showFlip = true } label: {
                         Label("パラパラ", systemImage: "book").frame(maxWidth: .infinity)
                     }
@@ -250,31 +279,6 @@ struct BookDetailView: View {
                     }
                     .padding(.top, 2)
                 }
-
-                // 付箋一覧（ページごと・剥がし対応）
-                if placed.isEmpty {
-                    ContentUnavailableView(
-                        "まだ付箋がありません",
-                        systemImage: "tag",
-                        description: Text("撮って、貼りたい部分を囲んでみましょう"))
-                        .padding(.top, 20)
-                } else {
-                    ForEach(placedByPage, id: \.page) { group in
-                        VStack(spacing: 10) {
-                            HStack {
-                                Text("p.\(group.page)")
-                                    .font(.caption.weight(.semibold)).foregroundStyle(BooksStyle.subInk)
-                                Spacer()
-                            }
-                            ForEach(group.stickies) { s in
-                                StickyRow(sticky: s)
-                                    .onTapGesture { editing = s }
-                                    .peelable(tint: s.color.color) { markMastered(s) }
-                            }
-                        }
-                        .id("page-\(group.page)")
-                    }
-                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
@@ -283,8 +287,12 @@ struct BookDetailView: View {
     }
 
     private func setPhoto(_ image: UIImage) {
+        // 一旦 nil にして PhotoReaderView を破棄し、@State をリセット
+        photo = nil
         pageNumber = AppStore.lastPage(for: book.id)
-        photo = uprightImage(image)
+        DispatchQueue.main.async {
+            photo = uprightImage(image)
+        }
     }
 
     private func loadPicked(_ item: PhotosPickerItem?) {
@@ -329,6 +337,11 @@ struct PhotoReaderView: View {
     @State private var pinching = false
     @State private var matchingTask: Task<Void, Never>?
     @State private var matchingID: UUID?
+    @State private var draggingPin: UUID?
+    @State private var pinDragOffset: CGSize = .zero
+    @State private var undoPinID: UUID?
+    @State private var undoPinRect: CGRect?
+    @State private var undoPinPosition: CGPoint = .zero
     @State private var restoring = false
     @State private var busy = false
     @State private var recognitionTask: Task<Void, Never>?
@@ -338,10 +351,10 @@ struct PhotoReaderView: View {
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     private var activeStickies: [Sticky] {
-        book.stickies.filter { $0.placed && !$0.mastered && $0.pageNumber == pageNumber }
+        book.stickies.filter { $0.placed && !$0.mastered && $0.deletedAt == nil && $0.pageNumber == pageNumber }
     }
     private var pageUnplaced: [Sticky] {
-        book.stickies.filter { !$0.placed && !$0.mastered && $0.pageNumber == pageNumber }
+        book.stickies.filter { !$0.placed && !$0.mastered && $0.deletedAt == nil && $0.pageNumber == pageNumber }
     }
 
     var body: some View {
@@ -360,9 +373,7 @@ struct PhotoReaderView: View {
             }
             .padding(.horizontal, 16)
 
-            if selectedRect != nil {
-                selectionControls
-            } else {
+            if selectedRect == nil {
                 Text(busy ? "ページを読み取り中…" : "ピンチで拡大。「移動」で位置を合わせ、「範囲選択」で囲みます。ピンをタップするとメモが開きます")
                     .font(.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 20)
@@ -377,11 +388,6 @@ struct PhotoReaderView: View {
                         }
                     }
                 }.font(.caption).padding(.horizontal, 20)
-            }
-            if selectedRect == nil && !pageUnplaced.isEmpty {
-                Text("このページに位置未定のメモが\(pageUnplaced.count)件。囲むと配置されます")
-                    .font(.caption).foregroundStyle(BooksStyle.accent)
-                    .padding(.horizontal, 20)
             }
             if let message {
                 Text(message).font(.caption).foregroundStyle(.secondary)
@@ -418,25 +424,37 @@ struct PhotoReaderView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Text("ページ").font(.caption).bold().fixedSize()
-            TextField("例)12", text: $pageText)
-                .frame(width: 56).textFieldStyle(.roundedBorder)
-                .keyboardType(.numberPad).focused($pageFieldFocused)
-                .disabled(selectedRect != nil)
-                .onChange(of: pageText) { _, value in
-                    pageNumber = Int(value.filter { $0.isNumber })
-                    if let pn = pageNumber { AppStore.setLastPage(pn, for: book.id) }
+        VStack(spacing: 8) {
+            // 位置未定メモのバナー
+            if !pageUnplaced.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.and.ellipse")
+                    Text("このページに位置未定のメモが\(pageUnplaced.count)件")
+                        .font(.caption.bold())
+                    Spacer()
+                    Text("囲むと配置").font(.caption2)
                 }
-            Spacer()
-            if !wholeLoaded && selectedRect == nil {
-                Button("全体を読む") { loadWholePage() }
-                    .font(.caption).disabled(busy)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(BooksStyle.accent, in: RoundedRectangle(cornerRadius: 10))
             }
-            Button("閉じる") { onClose() }
-                .font(.footnote.weight(.semibold))
-                .buttonStyle(.borderedProminent).tint(BooksStyle.ink)
-                .clipShape(Capsule())
+
+            if selectedRect != nil {
+                selectionControls
+            }
+
+            HStack(spacing: 8) {
+                Text("ページ").font(.caption).bold().fixedSize()
+                TextField("例)12", text: $pageText)
+                    .frame(width: 56).textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad).focused($pageFieldFocused)
+                    .disabled(selectedRect != nil)
+                    .onChange(of: pageText) { _, value in
+                        pageNumber = Int(value.filter { $0.isNumber })
+                        if let pn = pageNumber { AppStore.setLastPage(pn, for: book.id) }
+                    }
+                Spacer()
+            }
         }
         .padding(.horizontal, 16).padding(.top, 12)
     }
@@ -454,7 +472,7 @@ struct PhotoReaderView: View {
                 Text("範囲選択").tag(false)
                 Text("移動").tag(true)
             }.pickerStyle(.segmented)
-            Button("全体") {
+            Button("リセット") {
                 manualZoom = 1
                 manualOffset = .zero
             }.font(.caption)
@@ -468,8 +486,9 @@ struct PhotoReaderView: View {
     private var selectionControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "viewfinder")
-                Text("選択した部分を確認").font(.subheadline).bold()
+                Image(systemName: "viewfinder").foregroundStyle(BooksStyle.accent)
+                Text("選択した部分を確認").font(.subheadline.bold())
+                    .foregroundStyle(BooksStyle.ink)
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
             }
@@ -485,22 +504,26 @@ struct PhotoReaderView: View {
                     .buttonStyle(.bordered)
                 Spacer()
                 if !busy {
-                    if draft == nil {
-                        Button("再試行") {
-                            if let rect = selectedRect, let pn = draftPage { recognizeSelection(rect, page: pn) }
-                        }.buttonStyle(.bordered)
+                    // TODO: 図として追加は一旦無効化
+                    // if draft == nil {
+                    //     Button("再試行") {
+                    //         if let rect = selectedRect, let pn = draftPage { recognizeSelection(rect, page: pn) }
+                    //     }.buttonStyle(.bordered)
+                    // }
+                    if draft != nil {
+                        Button { confirmSelection() } label: {
+                            Label("付箋を追加", systemImage: "pin.fill")
+                                .font(.subheadline.bold())
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(BooksStyle.accent)
                     }
-                    Button { confirmSelection() } label: {
-                        Label(draft == nil ? "図として追加" : "付箋を追加", systemImage: "pin.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(BooksStyle.ink)
                 }
             }
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
+        .padding(16)
+        .background(BooksStyle.card, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
     }
 
     private func imageCanvas(w: CGFloat, h: CGFloat) -> some View {
@@ -562,6 +585,8 @@ struct PhotoReaderView: View {
             if selectedRect == nil {
                 ForEach(activeStickies) { sticky in
                     if let rect = localPins[sticky.id] ?? cachedPins[sticky.id] {
+                        let isDragging = draggingPin == sticky.id
+                        let extraOffset = isDragging ? pinDragOffset : .zero
                         Button { onEdit(sticky) } label: {
                             Image(systemName: "pin.fill")
                                 .font(.system(size: 13, weight: .bold))
@@ -569,16 +594,84 @@ struct PhotoReaderView: View {
                                 .frame(width: 28, height: 28)
                                 .background(sticky.color.color, in: RoundedRectangle(cornerRadius: 9))
                                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white, lineWidth: 2))
-                                .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+                                .shadow(color: .black.opacity(isDragging ? 0.3 : 0.18),
+                                        radius: isDragging ? 8 : 3, y: isDragging ? 4 : 2)
+                                .scaleEffect(isDragging ? 1.3 : 1.0)
                                 .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .position(x: (rect.maxX - 0.5) * w * scale + w / 2 + offset.width + extraOffset.width,
+                                  y: (rect.minY - 0.5) * h * scale + h / 2 + offset.height + extraOffset.height)
+                        .highPriorityGesture(
+                            LongPressGesture(minimumDuration: 0.25)
+                                .sequenced(before: DragGesture(minimumDistance: 4, coordinateSpace: .global))
+                                .onChanged { value in
+                                    if case .second(true, let drag?) = value {
+                                        draggingPin = sticky.id
+                                        pinDragOffset = drag.translation
+                                    }
+                                }
+                                .onEnded { value in
+                                    if case .second(true, let drag?) = value {
+                                        // 画面上の最終位置から画像上の正規化座標を逆算
+                                        // pin表示: screenX = (normX - 0.5) * w * scale + w/2 + offset.width
+                                        // → normX = (screenX - w/2 - offset.width) / (w * scale) + 0.5
+                                        let finalScreenX = (rect.maxX - 0.5) * w * scale + w / 2 + offset.width + drag.translation.width
+                                        let finalScreenY = (rect.minY - 0.5) * h * scale + h / 2 + offset.height + drag.translation.height
+                                        let normX = (finalScreenX - w / 2 - offset.width) / (w * scale) + 0.5
+                                        let normY = (finalScreenY - h / 2 - offset.height) / (h * scale) + 0.5
+                                        let newRect = CGRect(
+                                            x: normX - rect.width,
+                                            y: normY,
+                                            width: rect.width,
+                                            height: rect.height)
+                                        undoPinID = sticky.id
+                                        undoPinRect = rect
+                                        undoPinPosition = CGPoint(x: finalScreenX, y: finalScreenY)
+                                        localPins[sticky.id] = newRect
+                                        cachedPins[sticky.id] = newRect
+                                        sticky.savedPinRect = newRect
+                                        Task {
+                                            try? await Task.sleep(nanoseconds: 4_000_000_000)
+                                            await MainActor.run {
+                                                if undoPinID == sticky.id {
+                                                    withAnimation { undoPinID = nil }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    withAnimation(.spring(response: 0.2)) {
+                                        draggingPin = nil
+                                        pinDragOffset = .zero
+                                    }
+                                }
+                        )
                         .accessibilityLabel("付箋: \(sticky.heading)")
-                        .accessibilityHint("タップしてメモを開く")
-                        .position(x: (rect.maxX - 0.5) * w * scale + w / 2 + offset.width,
-                                  y: (rect.minY - 0.5) * h * scale + h / 2 + offset.height)
+                        .accessibilityHint("タップでメモを開く。長押しでドラッグして移動")
+                        .animation(.spring(response: 0.2), value: isDragging)
                     }
+                }
+
+                // ピン移動後の「元に戻す」吹き出し
+                if let undoID = undoPinID, let oldRect = undoPinRect {
+                    Button {
+                        localPins[undoID] = oldRect
+                        cachedPins[undoID] = oldRect
+                        if let sticky = activeStickies.first(where: { $0.id == undoID }) {
+                            sticky.savedPinRect = oldRect
+                        }
+                        withAnimation { undoPinID = nil }
+                    } label: {
+                        Label("元に戻す", systemImage: "arrow.uturn.backward")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .foregroundStyle(.white)
+                            .background(.black.opacity(0.8), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .position(x: undoPinPosition.x, y: undoPinPosition.y - 34)
+                    .transition(.scale.combined(with: .opacity))
                 }
             }
         }
@@ -663,6 +756,7 @@ struct PhotoReaderView: View {
             NotificationScheduler.scheduleInitial(for: sticky)
         }
         localPins[sticky.id] = rect
+        sticky.savedPinRect = rect
         AppStore.setLastPage(page, for: book.id)
         AIHelper.improveHeading(for: sticky)
         cancelSelection()
@@ -708,12 +802,24 @@ struct PhotoReaderView: View {
                                                          onCancel: { worker.cancel() })
             guard !Task.isCancelled, matchingID == id else { return }
 
-                guard !Task.isCancelled, matchingID == id else { return }
+            // OCRマッチ失敗分は保存済みピン位置をフォールバックに使う
+            for (stickyID, _) in markers where pins[stickyID] == nil {
+                if let sticky = activeStickies.first(where: { $0.id == stickyID }),
+                   let saved = sticky.savedPinRect {
+                    pins[stickyID] = saved
+                }
+            }
+
+            // OCRで見つかった新しい位置を保存
+            for (stickyID, rect) in pins {
+                if let sticky = activeStickies.first(where: { $0.id == stickyID }) {
+                    sticky.savedPinRect = rect
+                }
+            }
+
             cachedPins = pins
             restoring = false
             matchingTask = nil
-            let unmatched = markers.count - pins.count
-            message = unmatched > 0 ? "位置を特定できない付箋が\(unmatched)枚あります。ページ番号を確認するか、付箋一覧から開けます" : nil
         }
     }
 
@@ -940,6 +1046,23 @@ struct StickyEditor: View {
                             }
                     }
                 }
+                Section("位置") {
+                    HStack {
+                        Text("ページ").font(.caption).foregroundStyle(.secondary)
+                        TextField("ページ番号", value: $sticky.pageNumber, format: .number)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("目印テキスト").font(.caption).foregroundStyle(.secondary)
+                        TextField("付箋を貼った行の文章", text: $sticky.marker, axis: .vertical)
+                            .lineLimit(2...4)
+                            .font(.subheadline)
+                            .onChange(of: sticky.marker) { _, v in
+                                sticky.heading = Sticky.makeHeading(memo: memoText, marker: v)
+                            }
+                    }
+                }
                 Section("重要度") {
                     Picker("重要度", selection: $sticky.importance) {
                         Text("★").tag(1); Text("★★").tag(2); Text("★★★").tag(3)
@@ -985,7 +1108,7 @@ struct StickyEditor: View {
             }
             .confirmationDialog("この付箋を削除しますか？", isPresented: $showDeleteConfirm,
                                 titleVisibility: .visible) {
-                Button("削除する", role: .destructive) { context.delete(sticky); dismiss() }
+                Button("削除する", role: .destructive) { sticky.deletedAt = .now; dismiss() }
                 Button("キャンセル", role: .cancel) {}
             }
         }
@@ -1011,6 +1134,136 @@ struct CaptureButton: ButtonStyle {
     var ghost = false
     func makeBody(configuration: Configuration) -> some View {
         CaptureButtonBody(configuration: configuration, ghost: ghost)
+    }
+}
+
+// MARK: - 付箋一覧シート（ボトムシート）
+
+struct StickyListSheet: View {
+    let placedByPage: [(page: Int, stickies: [Sticky])]
+    let deletedStickies: [Sticky]
+    var onEdit: (Sticky) -> Void
+    var onMastered: (Sticky) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var showTrash = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 14) {
+                        ForEach(placedByPage, id: \.page) { group in
+                            VStack(spacing: 10) {
+                                HStack {
+                                    Text("p.\(group.page)")
+                                        .font(.caption.weight(.semibold)).foregroundStyle(BooksStyle.subInk)
+                                    Spacer()
+                                }
+                                ForEach(group.stickies) { s in
+                                    StickyRow(sticky: s)
+                                        .onTapGesture { onEdit(s) }
+                                        .peelable(tint: s.color.color) { onMastered(s) }
+                                }
+                            }
+                            .id("page-\(group.page)")
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                }
+            }
+            .navigationTitle("付箋一覧")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showTrash = true
+                    } label: {
+                        Text("ゴミ箱")
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showTrash) {
+                DeletedStickyListView(stickies: deletedStickies)
+            }
+        }
+    }
+}
+
+// MARK: - ゴミ箱（削除済み付箋一覧・30日で完全削除）
+
+struct DeletedStickyListView: View {
+    let stickies: [Sticky]
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if stickies.isEmpty {
+                    ContentUnavailableView(
+                        "ゴミ箱は空です",
+                        systemImage: "trash",
+                        description: Text("削除した付箋は30日後に完全に削除されます"))
+                } else {
+                    List {
+                        ForEach(stickies) { s in
+                            DeletedStickyRow(sticky: s)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("ゴミ箱")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") { dismiss() }
+                }
+                if !stickies.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("すべて完全削除", role: .destructive) {
+                            for s in stickies { context.delete(s) }
+                        }
+                        .tint(.red)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct DeletedStickyRow: View {
+    @Bindable var sticky: Sticky
+    @Environment(\.modelContext) private var context
+
+    private var daysLeft: Int {
+        guard let deletedAt = sticky.deletedAt else { return 30 }
+        let deadline = Calendar.current.date(byAdding: .day, value: 30, to: deletedAt) ?? deletedAt
+        return max(0, Calendar.current.dateComponents([.day], from: .now, to: deadline).day ?? 0)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(sticky.color.color)
+                .frame(width: 5)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(sticky.heading).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(sticky.marker).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text("あと\(daysLeft)日で完全削除")
+                    .font(.caption2).foregroundStyle(.red)
+            }
+            Spacer()
+            Button("元に戻す") {
+                sticky.deletedAt = nil
+            }
+            .font(.caption).foregroundStyle(.blue)
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
     }
 }
 

@@ -1,14 +1,53 @@
 import SwiftUI
 import UIKit
 
-// 付箋を長押し（0.15秒）→ 左右にスワイプして「剥がす」ジェスチャー。
+// 付箋を長押し（0.3秒）→ 左右にスワイプして「剥がす」ジェスチャー。
 //
 // 使い方:
 //   StickyRow(sticky: s)
 //       .peelable(tint: s.color.color) { markMastered(s) }
 //
-// スワイプ方向の反対側が軸になり、カードがめくれるように持ち上がる。
-// 剥がれたら上に飛んでいく。
+// UIGestureRecognizerRepresentable (iOS 18+) で UIKit の
+// UILongPressGestureRecognizer を使い、ScrollView との競合を解消。
+// 長押し成立前に指が動いた場合は ScrollView にタッチが渡る。
+
+// MARK: - UIKit ジェスチャブリッジ
+
+struct PeelPressGesture: UIGestureRecognizerRepresentable {
+    var minimumDuration: TimeInterval = 0.3
+    var onBegan: () -> Void
+    var onChanged: (CGSize) -> Void
+    var onEnded: () -> Void
+
+    final class Coordinator { var start: CGPoint = .zero }
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let g = UILongPressGestureRecognizer()
+        g.minimumPressDuration = minimumDuration
+        g.allowableMovement = 10
+        return g
+    }
+
+    func handleUIGestureRecognizerAction(_ g: UILongPressGestureRecognizer, context: Context) {
+        let p = g.location(in: nil)
+        switch g.state {
+        case .began:
+            context.coordinator.start = p
+            onBegan()
+        case .changed:
+            let s = context.coordinator.start
+            onChanged(CGSize(width: p.x - s.x, height: p.y - s.y))
+        case .ended, .cancelled:
+            onEnded()
+        default:
+            break
+        }
+    }
+}
+
+// MARK: - PeelableSticky
 
 struct PeelableSticky<Content: View>: View {
     let tint: Color
@@ -23,6 +62,7 @@ struct PeelableSticky<Content: View>: View {
     @State private var released = false
     @State private var gone = false
     @State private var lastTick: CGFloat = 0
+    @State private var verticalIntent = false
 
     private let liftEnd: CGFloat = 60
     private let glueEnd: CGFloat = 130
@@ -90,15 +130,11 @@ struct PeelableSticky<Content: View>: View {
                 .opacity(side == nil ? 0 : 1)
         }
         .gesture(
-            LongPressGesture(minimumDuration: 0.15)
-                .onEnded { _ in paper.impactOccurred(intensity: 0.3) }
-                .sequenced(before: DragGesture(minimumDistance: 0))
-                .onChanged { value in
-                    if case .second(true, let drag?) = value { changed(drag) }
-                }
-                .onEnded { value in
-                    if case .second(true, _) = value { ended() }
-                }
+            PeelPressGesture(
+                onBegan:   { paper.impactOccurred(intensity: 0.3) },
+                onChanged: { t in changed(t) },
+                onEnded:   { ended() }
+            )
         )
         .allowsHitTesting(!gone)
     }
@@ -111,15 +147,20 @@ struct PeelableSticky<Content: View>: View {
         }
     }
 
-    private func changed(_ v: DragGesture.Value) {
-        if side == nil {
-            guard abs(v.translation.width) > 6 else { return }
-            // スワイプ方向の反対の side を割り当て → スワイプ先が軸になる
-            side = v.translation.width > 0 ? .left : .right
+    private func changed(_ t: CGSize) {
+        if side == nil && !verticalIntent {
+            guard max(abs(t.width), abs(t.height)) > 8 else { return }
+            if abs(t.height) > abs(t.width) {
+                verticalIntent = true
+                return
+            }
+            side = t.width > 0 ? .left : .right
             glue.prepare(); snap.prepare()
         }
-        pull = max(0, v.translation.width * dir)
-        sway = v.translation.height
+        guard !verticalIntent else { return }
+
+        pull = max(0, t.width * dir)
+        sway = t.height
         tickHaptics()
 
         if !released && pull >= glueEnd {
@@ -134,6 +175,10 @@ struct PeelableSticky<Content: View>: View {
     }
 
     private func ended() {
+        if verticalIntent {
+            verticalIntent = false
+            return
+        }
         if released {
             withAnimation(.easeIn(duration: 0.3)) { gone = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onPeeled() }
