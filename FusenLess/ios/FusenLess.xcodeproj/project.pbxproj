@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		82D401FCBF44AED53D8DA8CF /* PageNumberReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23E03A2C0037B7DDDEDB2EF /* PageNumberReader.swift */; };
 		003B8179E5E881BD2CF1AA5C /* BooksStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC2725942318F73613CCE013 /* BooksStyle.swift */; };
 		1C66DB4036263B343289B3F6 /* OCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50EE6AF5DD0D2E683FA142E4 /* OCR.swift */; };
 		3AB77617897435B5BBDE6E8D /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11272EF05D66C3F2B9307DF0 /* NotificationScheduler.swift */; };
@@ -35,6 +36,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B23E03A2C0037B7DDDEDB2EF /* PageNumberReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageNumberReader.swift; sourceTree = "<group>"; };
 		0D446693C50D55907BE5173F /* TrashGameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashGameView.swift; sourceTree = "<group>"; };
 		0D4D1C2B3443431853127851 /* MasteredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasteredView.swift; sourceTree = "<group>"; };
 		0DC01DBA51363D200D403C67 /* SampleImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleImage.swift; sourceTree = "<group>"; };
@@ -89,6 +91,7 @@
 				C60ADBF94EA2DC50E1652956 /* Models.swift */,
 				11272EF05D66C3F2B9307DF0 /* NotificationScheduler.swift */,
 				50EE6AF5DD0D2E683FA142E4 /* OCR.swift */,
+				B23E03A2C0037B7DDDEDB2EF /* PageNumberReader.swift */,
 				820719FF4C99CF41BA3A9406 /* PeelModifier.swift */,
 				B3B47D08794C502D2FC3F17A /* QuickMemoSheet.swift */,
 				6C2BA9A11D0FD2D1BF951E15 /* RecallCrypto.swift */,
@@ -185,6 +188,7 @@
 				D428301A65148354A5E38036 /* Models.swift in Sources */,
 				3AB77617897435B5BBDE6E8D /* NotificationScheduler.swift in Sources */,
 				1C66DB4036263B343289B3F6 /* OCR.swift in Sources */,
+				82D401FCBF44AED53D8DA8CF /* PageNumberReader.swift in Sources */,
 				C674930F0B20DC08656E5E50 /* PeelModifier.swift in Sources */,
 				B7D10871516B573F36133FF9 /* QuickMemoSheet.swift in Sources */,
 				945F64D2A97010541136DAE4 /* RecallCrypto.swift in Sources */,
