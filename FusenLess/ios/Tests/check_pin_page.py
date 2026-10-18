@@ -41,6 +41,20 @@ checks = r'''
     precondition(PinRestoration.restore(saved:saved,matched:nil) == saved, "OCR failure must retain saved position")
     precondition(PinRestoration.restore(saved:saved,matched:wrongMatch) == saved, "do not overwrite manual pins")
     precondition(PinRestoration.restore(saved:nil,matched:wrongMatch) == wrongMatch, "legacy text matching")
+    let page417ID = UUID(), page418ID = UUID(), missingID = UUID()
+    let stored = [SavedPagePin(id:page417ID,pageNumber:417,rect:saved),
+                  SavedPagePin(id:page418ID,pageNumber:418,rect:wrongMatch),
+                  SavedPagePin(id:missingID,pageNumber:417,rect:nil)]
+    precondition(PinRestoration.pins(on:nil,from:stored).isEmpty, "no old-page pins before page is known")
+    let page417Pins = PinRestoration.pins(on:417,from:stored)
+    precondition(page417Pins.count == 1 && page417Pins[page417ID] == saved, "restore only detected page, without text OCR")
+    let page418Pins = PinRestoration.pins(on:418,from:stored)
+    precondition(page418Pins.count == 1 && page418Pins[page418ID] == wrongMatch && page418Pins[page417ID] == nil,
+                 "switch pages without old pins")
+    precondition(PageNumberReading(number:417,candidates:[418]).preferredNumber == 417)
+    precondition(PageNumberReading(number:nil,candidates:[417,418]).preferredNumber == 417,
+                 "best recognized candidate is automatically applied")
+    precondition(PageNumberReading(number:nil,candidates:[]).preferredNumber == nil)
     precondition(PinRestoration.normalized(CGRect(x: CGFloat.nan,y:0,width:0.1,height:0.1)) == nil)
     let clamped = PinRestoration.normalized(CGRect(x:-0.2,y:0.95,width:0.3,height:0.2))!
     precondition(clamped.minX >= 0 && clamped.maxX <= 1 && clamped.maxY <= 1)
@@ -65,6 +79,9 @@ checks = r'''
     draw("417",x:900,y:24,size:16)
     let result = await PageNumberReader.read(UIImage(cgImage:ctx.makeImage()!))
     precondition(result.number == 417,"small footer OCR: \(result.candidates)")
+    let automaticallyRestored = PinRestoration.pins(on:result.preferredNumber,from:stored)
+    precondition(automaticallyRestored[page417ID] == saved && automaticallyRestored[page418ID] == nil)
+    print("PASS: page-number OCR -> automatic page selection -> stored pins, no body OCR required")
     print("PASS: production Vision pipeline recognizes small footer 417 and rejects chapter 7.8 and body year 2026")
     let tilted = CGContext(data:nil,width:1000,height:1400,bitsPerComponent:8,bytesPerRow:0,
                            space:colorSpace,bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!

@@ -10,6 +10,9 @@ struct PageNumberObservation {
 struct PageNumberReading {
     let number: Int?
     let candidates: [Int]
+
+    // 読み取れた候補がある場合は入力欄へ自動適用する。確認ボタンは挟まない。
+    var preferredNumber: Int? { number ?? candidates.first }
 }
 
 // 数字を全部抜き出すと「7.8」「第7章」までページになるため、許可した形式だけ読む。
@@ -85,7 +88,23 @@ enum PageNumberResolver {
 }
 
 // 保存された場所を先に出す。自動照合で手動の位置を上書きしない。
+struct SavedPagePin {
+    let id: UUID
+    let pageNumber: Int
+    let rect: CGRect?
+}
+
 enum PinRestoration {
+    // ページが判明してから、そのページの保存座標だけを取り出す。本文OCRには依存しない。
+    static func pins(on pageNumber: Int?, from notes: [SavedPagePin]) -> [UUID: CGRect] {
+        guard let pageNumber, pageNumber > 0 else { return [:] }
+        var result: [UUID: CGRect] = [:]
+        for note in notes where note.pageNumber == pageNumber {
+            if let rect = normalized(note.rect) { result[note.id] = rect }
+        }
+        return result
+    }
+
     static func normalized(_ rect: CGRect?) -> CGRect? {
         guard let rect, [rect.minX, rect.minY, rect.width, rect.height].allSatisfy({ $0.isFinite }),
               rect.width > 0, rect.height > 0 else { return nil }
@@ -115,6 +134,8 @@ enum PageNumberReader {
             guard !Task.isCancelled else { return PageNumberReading(number: nil, candidates: []) }
             let normal = await OCR.recognize(image, regionOfInterest: region, pageNumbersOnly: true)
             observations += normal.lines.map { PageNumberObservation(text: $0.text, rect: $0.rect, confidence: $0.confidence) }
+            let normalReading = PageNumberResolver.resolve(observations)
+            if normalReading.number != nil { return normalReading }
             guard !Task.isCancelled else { return PageNumberReading(number: nil, candidates: []) }
             // 小さなノンブル用に、余白だけを拡大・コントラスト調整して再認識する。
             if let enhanced = enhancedMargin(image, region: region) {
@@ -127,6 +148,8 @@ enum PageNumberReader {
                         confidence: $0.confidence)
                 }
             }
+            let enhancedReading = PageNumberResolver.resolve(observations)
+            if enhancedReading.number != nil { return enhancedReading }
         }
         return PageNumberResolver.resolve(observations)
     }
