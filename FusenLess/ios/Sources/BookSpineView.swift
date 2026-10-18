@@ -9,7 +9,7 @@ struct BookSpineView: View {
     var onSelectPage: (Int) -> Void
 
     private var groups: [(page: Int, stickies: [Sticky])] {
-        let active = book.stickies.filter { $0.placed && !$0.mastered }
+        let active = book.stickies.filter { $0.placed && !$0.mastered && $0.deletedAt == nil }
         let dict = Dictionary(grouping: active) { $0.pageNumber }
         return dict.keys.sorted().map { ($0, dict[$0]!.sorted { $0.order < $1.order }) }
     }
