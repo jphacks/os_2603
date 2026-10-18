@@ -21,10 +21,8 @@ struct BookDetailView: View {
     @State private var showCameraAlert = false
     @State private var undoSticky: Sticky?
     @State private var showUndo = false
-    @State private var showDeletedStickies = false
     @State private var showStickySheet = false
-    @State private var pendingStickyTarget: String?
-    @State private var completionScrollTarget: String?
+    @State private var stickySheetPage: Int?
     @State private var showCompletionError = false
 
     private var alive: [Sticky] { book.stickies.filter { $0.deletedAt == nil } }
@@ -70,20 +68,12 @@ struct BookDetailView: View {
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
-        .sheet(isPresented: $showStickySheet, onDismiss: {
-            if let target = pendingStickyTarget {
-                completionScrollTarget = target
-                pendingStickyTarget = nil
-            }
-        }) {
-            StickyListSheet(book: book, placedByPage: placedByPage) { sticky in
-                pendingStickyTarget = "sticky-\(sticky.id)"
-                showStickySheet = false
-            }
-            .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showDeletedStickies) {
-            DeletedStickyListView(stickies: deletedStickies)
+        .sheet(isPresented: $showStickySheet) {
+            StickyListSheet(book: book, placedByPage: placedByPage,
+                            deletedStickies: deletedStickies, initialPage: stickySheetPage,
+                            onPeel: markMastered)
+                .overlay(alignment: .bottom) { undoToast }
+                .presentationDetents([.medium, .large])
         }
         .alert("付箋を保存できませんでした", isPresented: $showCompletionError) {
             Button("OK", role: .cancel) {}
@@ -179,7 +169,6 @@ struct BookDetailView: View {
     // MARK: - 撮影・一覧
 
     private var captureAndList: some View {
-        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 14) {
                 // 表紙・書名・著者（Apple Books の本の詳細のように中央に大きく）
@@ -274,78 +263,33 @@ struct BookDetailView: View {
                 }
 
                 HStack(spacing: 10) {
-                    Button { showStickySheet = true } label: {
+                    Button { stickySheetPage = nil; showStickySheet = true } label: {
                         Label("付箋一覧", systemImage: "list.bullet")
                             .frame(maxWidth: .infinity)
                     }
                     Button { showFlip = true } label: {
                         Label("パラパラ", systemImage: "book").frame(maxWidth: .infinity)
                     }
+                    .disabled(placed.isEmpty)
                     Button { showReview = true } label: {
                         Label("復習", systemImage: "brain.head.profile").frame(maxWidth: .infinity)
                     }
+                    .disabled(placed.isEmpty)
                 }
                 .buttonStyle(CaptureButton(ghost: true))
-                .disabled(placed.isEmpty)
-
-                // 教材を選んだ画面で、そのまま付箋を確認・編集・剥がせる。
-                HStack {
-                    Text("付箋 \(placed.count)枚").font(.headline)
-                    Spacer()
-                    Button("ゴミ箱") { showDeletedStickies = true }
-                        .font(.caption.weight(.semibold))
-                }
-                .id("sticky-list")
-
-                if placed.isEmpty {
-                    Text("まだ付箋がありません。カメラで撮って、気になる部分にピンを追加しましょう")
-                        .font(.subheadline).foregroundStyle(BooksStyle.subInk)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 12)
-                } else {
-                    Text("タップで編集。長押しして左右に動かすと剥がせます")
-                        .font(.caption).foregroundStyle(BooksStyle.subInk)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(placedByPage, id: \.page) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("p.\(group.page)")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(BooksStyle.subInk)
-                            ForEach(group.stickies) { sticky in
-                                StickyRow(sticky: sticky)
-                                    .onTapGesture { editing = sticky }
-                                    .peelable(tint: sticky.color.color) { markMastered(sticky) }
-                                    .id("sticky-\(sticky.id)")
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .id("page-\(group.page)")
-                    }
-                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-        }
-        .task(id: completionScrollTarget) {
-            guard let target = completionScrollTarget else { return }
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            withAnimation { proxy.scrollTo(target, anchor: .top) }
-            completionScrollTarget = nil
-        }
         }
     }
 
     private func finishCapture() {
         do {
             try context.save()
-            if let pageNumber, placedByPage.contains(where: { $0.page == pageNumber }) {
-                completionScrollTarget = "page-\(pageNumber)"
-            } else {
-                completionScrollTarget = "sticky-list"
-            }
+            stickySheetPage = pageNumber
             photo = nil
             pickerItem = nil
+            showStickySheet = true
         } catch {
             showCompletionError = true
         }
@@ -1199,45 +1143,66 @@ struct CaptureButton: ButtonStyle {
 struct StickyListSheet: View {
     let book: Book
     let placedByPage: [(page: Int, stickies: [Sticky])]
-    var onSelect: (Sticky) -> Void
+    let deletedStickies: [Sticky]
+    let initialPage: Int?
+    var onPeel: (Sticky) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var editing: Sticky?
+    @State private var showTrash = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    BookSpineView(book: book) { page in
-                        if let sticky = placedByPage.first(where: { $0.page == page })?.stickies.first {
-                            onSelect(sticky)
-                        }
-                    }
-                    Text("位置や付箋をタップすると、教材画面の該当する付箋へ移動します")
-                        .font(.caption).foregroundStyle(BooksStyle.subInk)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(placedByPage, id: \.page) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("p.\(group.page)")
-                                .font(.subheadline.weight(.semibold)).foregroundStyle(BooksStyle.subInk)
-                            ForEach(group.stickies) { sticky in
-                                Button { onSelect(sticky) } label: {
-                                    StickyRow(sticky: sticky)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        if placedByPage.isEmpty {
+                            ContentUnavailableView("まだ付箋がありません", systemImage: "note.text",
+                                description: Text("カメラで撮って、気になる部分にピンを追加しましょう"))
+                        } else {
+                            BookSpineView(book: book) { page in
+                                withAnimation { proxy.scrollTo("page-\(page)", anchor: .top) }
+                            }
+                            Text("位置をタップすると該当ページへ移動。付箋はタップで編集、長押しして左右に動かすと剥がせます")
+                                .font(.caption).foregroundStyle(BooksStyle.subInk)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            ForEach(placedByPage, id: \.page) { group in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("p.\(group.page)")
+                                        .font(.subheadline.weight(.semibold)).foregroundStyle(BooksStyle.subInk)
+                                    ForEach(group.stickies) { sticky in
+                                        StickyRow(sticky: sticky)
+                                            .onTapGesture { editing = sticky }
+                                            .peelable(tint: sticky.color.color) { onPeel(sticky) }
+                                    }
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityHint("シートを閉じて、この付箋へ移動します")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id("page-\(group.page)")
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .padding(20)
                 }
-                .padding(20)
+                .task {
+                    guard let initialPage else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    proxy.scrollTo("page-\(initialPage)", anchor: .top)
+                }
             }
             .background(BooksStyle.background)
             .navigationTitle("付箋一覧")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("ゴミ箱") { showTrash = true }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("閉じる") { dismiss() }
                 }
+            }
+            .sheet(item: $editing) { StickyEditor(sticky: $0) }
+            .sheet(isPresented: $showTrash) {
+                DeletedStickyListView(stickies: deletedStickies)
             }
         }
     }
