@@ -22,7 +22,8 @@ enum OCR {
     static func recognize(
         _ image: UIImage,
         regionOfInterest roi: CGRect? = nil,
-        pageNumbersOnly: Bool = false
+        pageNumbersOnly: Bool = false,
+        latinDigitsOnly: Bool = false
     ) async -> OCRResult {
         guard let cg = image.cgImage else {
             return OCRResult(lines: [], pageNumber: nil)
@@ -33,7 +34,7 @@ enum OCR {
         let request = VNRecognizeTextRequest()
         return await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
-                request.recognitionLanguages = ["ja-JP", "en-US"]
+                request.recognitionLanguages = latinDigitsOnly ? ["en-US"] : ["ja-JP", "en-US"]
                 request.recognitionLevel = .accurate
                 request.usesLanguageCorrection = !pageNumbersOnly
                 if pageNumbersOnly { request.minimumTextHeight = 0.002 }

@@ -3,7 +3,7 @@ Checks production numeric parsing, pin restoration, and Vision on a synthetic pa
 The tiny UIImage stand-in lets the same production OCR code run on macOS.
 """
 from pathlib import Path
-import subprocess, tempfile
+import subprocess, tempfile, sys
 project = Path(__file__).resolve().parents[1]
 reader = (project / 'Sources/PageNumberReader.swift').read_text().replace('#if canImport(UIKit)', '#if true').replace('import UIKit', '')
 ocr = (project / 'Sources/OCR.swift').read_text().replace('import UIKit', '')
@@ -52,8 +52,8 @@ checks = r'''
     precondition(page418Pins.count == 1 && page418Pins[page418ID] == wrongMatch && page418Pins[page417ID] == nil,
                  "switch pages without old pins")
     precondition(PageNumberReading(number:417,candidates:[418]).preferredNumber == 417)
-    precondition(PageNumberReading(number:nil,candidates:[417,418]).preferredNumber == 417,
-                 "best recognized candidate is automatically applied")
+    precondition(PageNumberReading(number:nil,candidates:[417,418]).preferredNumber == nil,
+                 "ambiguous candidates must not switch the page")
     precondition(PageNumberReading(number:nil,candidates:[]).preferredNumber == nil)
     precondition(PinRestoration.normalized(CGRect(x: CGFloat.nan,y:0,width:0.1,height:0.1)) == nil)
     let clamped = PinRestoration.normalized(CGRect(x:-0.2,y:0.95,width:0.3,height:0.2))!
@@ -91,6 +91,33 @@ checks = r'''
     let tiltedResult = await PageNumberReader.read(UIImage(cgImage:tilted.makeImage()!))
     precondition(tiltedResult.number == 417, "tilted page: \(tiltedResult.candidates)")
     print("PASS: slightly tilted synthetic page still resolves footer 417")
+    // 上下に競合する番号があれば下側を早期確定しない。
+    ctx.setFillColor(CGColor(gray:1,alpha:1));ctx.fill(CGRect(x:0,y:0,width:1000,height:1400))
+    draw("418",x:100,y:1350,size:18)
+    draw("417",x:900,y:24,size:18)
+    let conflict = await PageNumberReader.read(UIImage(cgImage:ctx.makeImage()!))
+    precondition(conflict.preferredNumber == nil, "conflicting margins must not auto-switch: \(conflict.candidates)")
+    // 中央付近の小さいノンブル。分割境界付近でも領域の重なりで欠けない。
+    for x: CGFloat in [300, 500, 600] {
+        ctx.setFillColor(CGColor(gray:1,alpha:1));ctx.fill(CGRect(x:0,y:0,width:1000,height:1400))
+        draw("417",x:x,y:24,size:10)
+        let small = await PageNumberReader.read(UIImage(cgImage:ctx.makeImage()!))
+        precondition(small.preferredNumber == 417, "tiny page number at \(x): \(small.candidates)")
+    }
+    print("PASS: conflicting header/footer rejected; tiny center and tile-boundary numbers recognized")
+    if CommandLine.arguments.count == 3 {
+        let url = URL(fileURLWithPath: CommandLine.arguments[1])
+        let source = CGImageSourceCreateWithURL(url as CFURL, nil)!
+        let cg = CGImageSourceCreateImageAtIndex(source, 0, nil)!
+        let expected = Int(CommandLine.arguments[2])!
+        let actual = await PageNumberReader.read(UIImage(cgImage: cg))
+        precondition(actual.preferredNumber == expected, "real-image regression: \(actual.candidates)")
+        print("PASS: supplied real-image fixture resolves page \(expected)")
+    }
+    ctx.setFillColor(CGColor(gray:0.8,alpha:1));ctx.fill(CGRect(x:0,y:0,width:1000,height:1400))
+    let blank = await PageNumberReader.read(UIImage(cgImage:ctx.makeImage()!))
+    precondition(blank.preferredNumber == nil, "enhancement must not invent a number on a blank page")
+    print("PASS: blank-page fallback produces no page number")
  }
 }
 '''
@@ -98,7 +125,7 @@ with tempfile.TemporaryDirectory(prefix='fusenless-pin-page-') as temp:
     temp=Path(temp)
     source=temp/'check.swift';source.write_text(stub+ocr+reader+checks)
     subprocess.run(['swiftc','-parse-as-library',str(source),'-o',str(temp/'check')],check=True)
-    subprocess.run([str(temp/'check')],check=True)
+    subprocess.run([str(temp/'check'), *sys.argv[1:3]],check=True)
 
 # Persist a real SwiftData pin, reopen the process, move it, and reopen again.
 persistence = r"""

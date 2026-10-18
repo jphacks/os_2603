@@ -11,8 +11,8 @@ struct PageNumberReading {
     let number: Int?
     let candidates: [Int]
 
-    // 読み取れた候補がある場合は入力欄へ自動適用する。確認ボタンは挟まない。
-    var preferredNumber: Int? { number ?? candidates.first }
+    // 確定できた番号は自動適用する。不確かな候補で別ページのピンを出さない。
+    var preferredNumber: Int? { number }
 }
 
 // 数字を全部抜き出すと「7.8」「第7章」までページになるため、許可した形式だけ読む。
@@ -130,28 +130,107 @@ enum PageNumberReader {
         let regions = [CGRect(x: 0, y: 0.68, width: 1, height: 0.32),
                        CGRect(x: 0, y: 0, width: 1, height: 0.28)]
         var observations: [PageNumberObservation] = []
+        // 下側の数字だけで確定せず、上側のノンブルとも比較する。
         for region in regions {
             guard !Task.isCancelled else { return PageNumberReading(number: nil, candidates: []) }
-            let normal = await OCR.recognize(image, regionOfInterest: region, pageNumbersOnly: true)
-            observations += normal.lines.map { PageNumberObservation(text: $0.text, rect: $0.rect, confidence: $0.confidence) }
-            let normalReading = PageNumberResolver.resolve(observations)
-            if normalReading.number != nil { return normalReading }
-            guard !Task.isCancelled else { return PageNumberReading(number: nil, candidates: []) }
-            // 小さなノンブル用に、余白だけを拡大・コントラスト調整して再認識する。
-            if let enhanced = enhancedMargin(image, region: region) {
+            let result = await OCR.recognize(image, regionOfInterest: region, pageNumbersOnly: true)
+            observations += result.lines.map {
+                PageNumberObservation(text: $0.text, rect: $0.rect, confidence: $0.confidence)
+            }
+        }
+        let initial = PageNumberResolver.resolve(observations)
+        if initial.number != nil { return initial }
+
+        // 広い帯のままでは小さい文字が潰れるため、左右・中央の重なる領域を独立して拡大。
+        // 元画像の座標へ戻して判定し、本文内の数字は引き続き除外する。
+        for region in regions {
+            for x: CGFloat in [0, 0.3, 0.6] {
+                guard !Task.isCancelled else { return PageNumberReading(number: nil, candidates: []) }
+                let tile = CGRect(x: x, y: region.minY, width: 0.4, height: region.height)
+                guard let enhanced = enhancedMargin(image, region: tile) else { continue }
                 let result = await OCR.recognize(enhanced, pageNumbersOnly: true)
                 observations += result.lines.map {
                     PageNumberObservation(text: $0.text,
-                        rect: CGRect(x: region.minX + $0.rect.minX * region.width,
-                                     y: region.minY + $0.rect.minY * region.height,
-                                     width: $0.rect.width * region.width, height: $0.rect.height * region.height),
+                        rect: CGRect(x: tile.minX + $0.rect.minX * tile.width,
+                                     y: tile.minY + $0.rect.minY * tile.height,
+                                     width: $0.rect.width * tile.width, height: $0.rect.height * tile.height),
                         confidence: $0.confidence)
                 }
             }
-            let enhancedReading = PageNumberResolver.resolve(observations)
-            if enhancedReading.number != nil { return enhancedReading }
+        }
+        let reading = PageNumberResolver.resolve(observations)
+        if reading.number != nil || !reading.candidates.isEmpty { return reading }
+
+        // 白抜きの装飾ノンブル用。ページの縁や本文と結合しないよう、
+        // 上下端から少し内側の小領域で局所的な明るさの差を取り出す。
+        // 通常OCRで候補がある場合はこの強い補正で上書きしない。
+        for y: CGFloat in [0.89, 0.01] {
+            for x: CGFloat in [0, 0.2, 0.4, 0.6, 0.8] {
+                guard !Task.isCancelled else { return PageNumberReading(number: nil, candidates: []) }
+                let tile = CGRect(x: x, y: y, width: 0.2, height: 0.1)
+                guard let prepared = lightDigits(image, region: tile) else { continue }
+                let result = await OCR.recognize(prepared, pageNumbersOnly: true, latinDigitsOnly: true)
+                observations += result.lines.compactMap { line in
+                    // 背景ノイズから生成される短い数字や補正文字は採用しない。
+                    guard let parsed = PageNumberResolver.parse(line.text), !parsed.corrected,
+                          parsed.value >= 10, line.confidence >= 0.8 else { return nil }
+                    return PageNumberObservation(text: line.text,
+                        rect: CGRect(x: tile.minX + line.rect.minX * tile.width,
+                                     y: tile.minY + line.rect.minY * tile.height,
+                                     width: line.rect.width * tile.width, height: line.rect.height * tile.height),
+                        confidence: line.confidence)
+                }
+            }
         }
         return PageNumberResolver.resolve(observations)
+    }
+
+    // 周囲より明るい画素を黒文字へ変換。単純な反転で残る丸い背景を抑える。
+    private static func lightDigits(_ image: UIImage, region: CGRect) -> UIImage? {
+        guard image.imageOrientation == .up, let cg = image.cgImage,
+              let patch = cg.cropping(to: CGRect(x: region.minX * CGFloat(cg.width),
+                  y: region.minY * CGFloat(cg.height), width: region.width * CGFloat(cg.width),
+                  height: region.height * CGFloat(cg.height))) else { return nil }
+        let w = patch.width, h = patch.height
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(patch, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return nil }
+        var values = [Double](repeating: 0, count: w * h)
+        var sums = [Double](repeating: 0, count: (w + 1) * (h + 1))
+        for y in 0..<h { for x in 0..<w {
+            let i = y * w + x
+            values[i] = (Double(bytes[i*4]) + Double(bytes[i*4+1]) + Double(bytes[i*4+2])) / 765
+            sums[(y+1)*(w+1)+x+1] = values[i] + sums[y*(w+1)+x+1]
+                + sums[(y+1)*(w+1)+x] - sums[y*(w+1)+x]
+        }}
+        let radius = max(2, Int((CGFloat(cg.width) / 280).rounded()))
+        for y in 0..<h { for x in 0..<w {
+            let x0 = max(0, x-radius), x1 = min(w, x+radius+1)
+            let y0 = max(0, y-radius), y1 = min(h, y+radius+1)
+            let mean = (sums[y1*(w+1)+x1] - sums[y0*(w+1)+x1]
+                - sums[y1*(w+1)+x0] + sums[y0*(w+1)+x0]) / Double((x1-x0)*(y1-y0))
+            let i = y*w+x
+            let value: UInt8 = values[i] > mean + 0.04 ? 0 : 255
+            bytes[i*4] = value; bytes[i*4+1] = value; bytes[i*4+2] = value; bytes[i*4+3] = 255
+        }}
+        let output = bytes.withUnsafeMutableBytes { buffer -> CGImage? in
+            let context = CGContext(data: buffer.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                bytesPerRow: w*4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            return context?.makeImage()
+        }
+        guard let output else { return nil }
+        let scale = max(1, min(4, 900 / CGFloat(w)))
+        let enlarged = CIImage(cgImage: output).applyingFilter("CILanczosScaleTransform",
+            parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1])
+        guard let final = imageContext.createCGImage(enlarged, from: enlarged.extent) else { return nil }
+        return UIImage(cgImage: final)
     }
 
     private static func enhancedMargin(_ image: UIImage, region: CGRect) -> UIImage? {

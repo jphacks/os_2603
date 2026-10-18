@@ -849,11 +849,11 @@ struct PhotoReaderView: View {
                 pageNumber = pn
                 AppStore.setLastPage(pn, for: book.id)
                 updateCachedPins()
-                message = reading.number == nil
-                    ? "ページ \(pn) に自動切り替えしました。違う場合は番号を修正できます"
-                    : "ページ \(pn) に自動切り替えしました"
+                message = "ページ \(pn) に自動切り替えしました"
             } else {
-                message = "ページ番号を読み取れませんでした。番号を入力してください"
+                message = reading.candidates.isEmpty
+                    ? "ページ番号を認識できませんでした。再読取するか、番号を入力してください"
+                    : "ページ番号を確定できませんでした（候補: \(reading.candidates.map(String.init).joined(separator: "・"))）。番号を入力してください"
             }
         }
     }
