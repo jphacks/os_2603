@@ -22,6 +22,7 @@ targets:
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
         INFOPLIST_KEY_NSCameraUsageDescription: "本のページを撮影してOCRするために使います"
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "本のページ画像を選んでOCRするために使います"
