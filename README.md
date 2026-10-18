@@ -1,4 +1,4 @@
-# BookMark（本の付箋アプリ）
+# FusenLess（本の付箋アプリ）
 
 <!-- TODO: サムネイル画像とデモ動画のリンクに差し替え -->
 [![IMAGE ALT TEXT HERE](https://jphacks.com/wp-content/uploads/2026/07/IMG_5316.png)](https://www.youtube.com/watch?v=piaNsc6ilBI)
@@ -19,71 +19,85 @@
 特に **B1（一瞬で貼れる）・B3（周辺文で思い出す）・B4（多くても区別できる）** を最重要と位置づけ、物理の良さを保ったままデジタルの強みを足すことを目指しました。
 
 ### 製品説明（具体的な製品の説明）
-1. 本を選ぶ（ISBN、または登録済みリスト）
+1. 本を選ぶ（ISBNバーコード読み取り、または手入力で登録）
 2. ページを撮り、行をタップすると付箋ができる。メモは **声でも** 入力できる
 3. 次に同じページを撮ると、付箋とメモが **元の行に自動で戻る**
 4. 本が手元になくても **「パラパラモード」** で、付箋のあるページをページ順にめくり、周辺の文章で内容を思い出せる
-5. 試験前に付箋から復習する
-6. **本はきれいなまま、学んだことはアプリに残る**
+5. メモ末尾に `?` をつけると **復習モード** で間隔反復学習ができる
+6. 覚えた付箋は **長押し＋スワイプ** で「ペリッ」と剥がす体感で整理
+7. **本はきれいなまま、学んだことはアプリに残る**
 
-> プライバシー・著作権・容量に配慮し、**ページ全体の画像は保存しません**。
-> 保存するのは「本・ページ番号・目印の文字列・メモ・付箋まわりの数行の切り抜き」だけです。
+> プライバシー・著作権・容量に配慮し、**ページの画像は保存しません**。
+> 保存するのは「本・ページ番号・目印の文字列・メモ・付箋まわりの数行テキスト」だけです。
 
 ### 特長
 #### 1. 一瞬で貼れる（B1）
 撮って **行をタップするだけ** で付箋が付きます。メモは後からでOK、声でも入力可能。
 電車などで撮れない場面のために、**写真なしでメモだけ先に残す**モードも用意（後でそのページを撮ると行に配置）。
+ページ番号はOCRで **自動検出** し、見つからない場合は入力を促します。
 
 #### 2. 本がなくても思い出せる（B3）
-付箋まわりの数行だけを保存し、**パラパラモード**でページ順にめくって「この話だった」を再現。
+付箋まわりの数行テキストだけを保存し、**パラパラモード**でページ順にめくって「この話だった」を再現。
 各付箋には一言見出しとメモが並び、本が手元になくても復習できます。
 
 #### 3. 多くても区別でき、元の行に自動で戻る（B4）
 色・重要度・一言見出しで識別。再撮影時は **目印の文字列のあいまい一致** で、OCRが多少ずれても付箋を元の行へ自動配置します（配置はAIではなくアルゴリズム）。
+
+#### 4. 復習と間隔反復（C）
+メモ末尾に `?` をつけると復習対象になり、**間隔反復スケジュール**（SM-2簡易版）で通知。
+復習モードではQ&A形式で「もう一度」「次へ」で進められます。
+
+#### 5. 付箋を剥がす体験
+覚えた付箋は **長押し→左右スワイプ** で剥がせます。のり側から段階的にめくれる3Dアニメーション、ペリペリ→バリッのハプティクスで、物理の付箋を剥がす感覚を再現。
 
 ### 解決出来ること
 - 借りた本・売りたい本でも、**汚さずに** 自分の本のように学べる
 - 本が手元になくても、付箋と周辺文で復習できる（A15）
 - 本をまたいで付箋を検索（A16）、並べ替え（A18）、色・重要度で整理（A13/A17）
 - 机がなくても、まずメモだけ残せる（A5）
+- 間隔反復で効率的に復習できる
 
 ### 今後の展望
-- **端末内AI** による「付箋ごとの一言見出し」と「復習問題」の自動生成
 - **縦書き教科書**のOCR対応、傾き補正などOCR前処理の強化
-- ISBNバーコードスキャン、書誌情報の自動取得
 - クラス・ゼミ単位での付箋共有
+- 端末内AIによる復習問題の高度化
 
 ### 注力したこと（こだわり等）
-* **「画像を保存しない」設計**：目印＋周辺の切り抜き＋メモだけを持つことで、軽量・プライバシー・著作権に配慮
+* **「画像を保存しない」設計**：目印＋周辺テキスト＋メモだけを持つことで、軽量・プライバシー・著作権に配慮
 * **付箋の配置はAIではなくアルゴリズム**（あいまい一致）で確実・高速に。AIの役割は見出しと復習問題に限定
 * **物理の付箋の良さ（B1/B3/B4）を最優先** に体験設計
-* **Webで体験を素早く検証 → iPhoneネイティブ(Apple Vision)で本番化** の二段構え
+* **付箋を剥がすハプティクス**：soft→rigid→heavyの3段階で「ペリペリ→バリッ」を再現
+* **iPhoneネイティブ(Apple Vision)で本番化**
 
 ## 開発技術
 ### 活用した技術
 #### API・データ
 * 端末内OCR・端末内保存を基本（外部送信なし）
-* ISBN/書誌情報（現在は手入力。将来、書誌APIでの自動取得を想定）
+* openBD API（ISBNバーコードから書誌情報を自動取得）
 
 #### フレームワーク・ライブラリ・モジュール
-* iPhoneネイティブ（本番）：**SwiftUI / SwiftData / Vision（日本語OCR）/ PhotosUI**（音声メモに Speech を予定）
-* Web試作（体験検証）：**React / Vite / TypeScript / Tesseract.js / Web Speech API**
+* **SwiftUI / SwiftData / Vision（日本語OCR）/ AVFoundation / PhotosUI / Speech**
 
 #### デバイス
 * iPhone（iOS 17以降）
-* 試作はiPhoneのブラウザでも動作（体験検証用）
 
 ### 独自技術
 #### ハッカソンで開発した独自機能・技術
 * **目印のあいまい一致による付箋の自動復元**：行の文字列の類似度（Levenshtein）で、再撮影時にOCRがずれても付箋を元の行へ戻す。
-  * ネイティブ: [`BookMark/ios/Sources/Matching.swift`](./BookMark/ios/Sources/Matching.swift) ／ Web: [`BookMark/ios/Sources/Matching.swift`](./BookMark/ios/Sources/Matching.swift)
-* **画像を保存しない付箋モデル**（本・ページ番号・目印・メモ・周辺の切り抜きだけを保存）。
-  * [`BookMark/ios/Sources/Models.swift`](./BookMark/ios/Sources/Models.swift) ／ [`BookMark/ios/Sources/Models.swift`](./BookMark/ios/Sources/Models.swift)
+  * [`FusenLess/ios/Sources/Matching.swift`](./FusenLess/ios/Sources/Matching.swift)
+* **画像を保存しない付箋モデル**（本・ページ番号・目印・メモ・周辺テキストだけを保存）。
+  * [`FusenLess/ios/Sources/Models.swift`](./FusenLess/ios/Sources/Models.swift)
 * **端末内 Apple Vision での日本語OCR＋ページ番号自動検出**、写真上に行オーバーレイして付箋を配置。
-  * [`BookMark/ios/Sources/OCR.swift`](./BookMark/ios/Sources/OCR.swift) ／ [`BookMark/ios/Sources/BookDetailView.swift`](./BookMark/ios/Sources/BookDetailView.swift)
-* **パラパラモード（B3）**：本がなくても周辺文で思い出す（Web試作で体験を実装、ネイティブは実装予定）。
-  * [`BookMark/ios/Sources/FlipView.swift`](./BookMark/ios/Sources/FlipView.swift)
+  * [`FusenLess/ios/Sources/OCR.swift`](./FusenLess/ios/Sources/OCR.swift) / [`FusenLess/ios/Sources/BookDetailView.swift`](./FusenLess/ios/Sources/BookDetailView.swift)
+* **パラパラモード（B3）**：本がなくても周辺文で思い出す。
+  * [`FusenLess/ios/Sources/FlipView.swift`](./FusenLess/ios/Sources/FlipView.swift)
+* **復習モード + 間隔反復通知**：SM-2簡易版でスケジューリング。
+  * [`FusenLess/ios/Sources/ReviewView.swift`](./FusenLess/ios/Sources/ReviewView.swift) / [`FusenLess/ios/Sources/NotificationScheduler.swift`](./FusenLess/ios/Sources/NotificationScheduler.swift)
+* **付箋を剥がすジェスチャー**：3Dめくりアニメーション＋3段階ハプティクスで物理の感覚を再現。
+  * [`FusenLess/ios/Sources/PeelModifier.swift`](./FusenLess/ios/Sources/PeelModifier.swift)
 * **写真なしクイックメモ（A5）**：先にメモだけ残し、後で撮影したページの行へ配置。
-  * [`BookMark/ios/Sources/Store.swift`](./BookMark/ios/Sources/Store.swift) ／ [`BookMark/ios/Sources/BookDetailView.swift`](./BookMark/ios/Sources/BookDetailView.swift)
+  * [`FusenLess/ios/Sources/QuickMemoSheet.swift`](./FusenLess/ios/Sources/QuickMemoSheet.swift)
+* **AVCaptureSessionベースのカメラ**：ピンチズーム対応、UIImagePickerControllerより高速起動。
+  * [`FusenLess/ios/Sources/BookDetailView.swift`](./FusenLess/ios/Sources/BookDetailView.swift)
 
-> ソース一式は [`BookMark/`](./BookMark) を参照（Web試作＝ルート、iPhoneネイティブ＝ [`BookMark/ios/`](./BookMark/ios)）。
+> ソース一式は [`FusenLess/ios/`](./FusenLess/ios) を参照。
