@@ -1,4 +1,4 @@
-import Vision
+@preconcurrency import Vision
 import UIKit
 
 // 端末内OCR（Apple Vision・日本語）。Web版のTesseractに相当するが高精度。
@@ -8,6 +8,7 @@ struct OCRLine: Identifiable {
     let id = UUID()
     let text: String
     let rect: CGRect   // 正規化座標・左上原点（表示画像にそのまま重ねられる）
+    var confidence: Float = 1
 }
 
 struct OCRResult {
@@ -20,7 +21,8 @@ enum OCR {
     /// （プライバシー・速度のため、ページ全体は原則読まない）。
     static func recognize(
         _ image: UIImage,
-        regionOfInterest roi: CGRect? = nil
+        regionOfInterest roi: CGRect? = nil,
+        pageNumbersOnly: Bool = false
     ) async -> OCRResult {
         guard let cg = image.cgImage else {
             return OCRResult(lines: [], pageNumber: nil)
@@ -33,7 +35,8 @@ enum OCR {
             await withCheckedContinuation { continuation in
                 request.recognitionLanguages = ["ja-JP", "en-US"]
                 request.recognitionLevel = .accurate
-                request.usesLanguageCorrection = true
+                request.usesLanguageCorrection = !pageNumbersOnly
+                if pageNumbersOnly { request.minimumTextHeight = 0.002 }
                 if let roi {
                     // Vision は左下原点なので上下を反転。[0,1]にクランプ。
                     let y = max(0, min(1, 1 - roi.maxY))
@@ -49,10 +52,11 @@ enum OCR {
                     do {
                         try handler.perform([request])
                         let lines = (request.results ?? []).compactMap { observation -> OCRLine? in
-                            guard let text = observation.topCandidates(1).first?.string else { return nil }
+                            guard let candidate = observation.topCandidates(1).first else { return nil }
+                            let text = candidate.string
                             let box = observation.boundingBox
                             return OCRLine(text: text, rect: OCRGeometry.imageRect(
-                                from: box, regionOfInterest: request.regionOfInterest))
+                                from: box, regionOfInterest: request.regionOfInterest), confidence: candidate.confidence)
                         }.sorted { $0.rect.minY < $1.rect.minY }
                         continuation.resume(returning: OCRResult(
                             lines: lines, pageNumber: detectPageNumber(lines)))
@@ -67,21 +71,11 @@ enum OCR {
         })
     }
 
-    // ページ番号推定（数字だけの行で、上下の余白に近いものを優先）。
+    // 汎用OCRのページ候補も同じ判定器を使う。画面の自動入力は専用Readerに一本化。
     static func detectPageNumber(_ lines: [OCRLine]) -> Int? {
-        let candidates = lines.filter {
-            let t = $0.text.trimmingCharacters(in: .whitespaces)
-            return t.range(of: "^[0-9]{1,4}$", options: .regularExpression) != nil
-        }
-        guard !candidates.isEmpty else { return nil }
-        func score(_ l: OCRLine) -> Int {
-            let top = l.rect.minY < 0.12 ? 1 : 0
-            let bottom = l.rect.maxY > 0.88 ? 2 : 0
-            return top + bottom
-        }
-        let best = candidates.max { score($0) < score($1) }!
-        guard score(best) > 0 else { return nil }
-        return Int(best.text.trimmingCharacters(in: .whitespaces))
+        PageNumberResolver.resolve(lines.map {
+            PageNumberObservation(text: $0.text, rect: $0.rect, confidence: $0.confidence)
+        }).number
     }
 
     private static func cgOrientation(

@@ -348,6 +348,11 @@ struct PhotoReaderView: View {
     @State private var recognitionID: UUID?
     @State private var message: String?
     @State private var didAutoDetectPage = false
+    @State private var pageDetectionTask: Task<Void, Never>?
+    @State private var pageDetectionID: UUID?
+    @State private var detectingPage = false
+    @State private var pageConfirmed = false
+    @State private var pageCandidates: [Int] = []
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     private var activeStickies: [Sticky] {
@@ -404,13 +409,18 @@ struct PhotoReaderView: View {
         .onAppear {
             if let pn = pageNumber { pageText = String(pn) }
             haptic.prepare()
-            if book.stickies.contains(where: { $0.placed && !$0.mastered }) { loadWholePage() }
+            updateCachedPins()
+            if activeStickies.contains(where: { PinRestoration.normalized($0.savedPinRect) == nil }) { loadWholePage() }
             autoDetectPage()
             // キーボードを裏で事前ロード（初回表示の遅延対策）
             preWarmKeyboard()
         }
         .onDisappear {
             cancelSelection()
+            pageDetectionTask?.cancel()
+            pageDetectionTask = nil
+            pageDetectionID = nil
+            detectingPage = false
             matchingTask?.cancel()
             matchingID = nil
             restoring = false
@@ -418,7 +428,7 @@ struct PhotoReaderView: View {
         .onChange(of: pageNumber) { _, _ in
             cancelSelection()
             updateCachedPins()
-            if !activeStickies.isEmpty { loadWholePage() }
+            if activeStickies.contains(where: { PinRestoration.normalized($0.savedPinRect) == nil }) { loadWholePage() }
         }
         .onChange(of: activeStickies.map { $0.id }) { _, _ in updateCachedPins() }
     }
@@ -445,18 +455,43 @@ struct PhotoReaderView: View {
 
             HStack(spacing: 8) {
                 Text("ページ").font(.caption).bold().fixedSize()
-                TextField("例)12", text: $pageText)
+                TextField("例)12", text: Binding(
+                    get: { pageText },
+                    set: { confirmPageText($0) }
+                ))
                     .frame(width: 56).textFieldStyle(.roundedBorder)
                     .keyboardType(.numberPad).focused($pageFieldFocused)
                     .disabled(selectedRect != nil)
-                    .onChange(of: pageText) { _, value in
-                        pageNumber = Int(value.filter { $0.isNumber })
-                        if let pn = pageNumber { AppStore.setLastPage(pn, for: book.id) }
-                    }
                 Spacer()
+                if detectingPage { ProgressView().controlSize(.small) }
+                Button("再読取") {
+                    didAutoDetectPage = false
+                    autoDetectPage()
+                }.font(.caption).disabled(detectingPage || selectedRect != nil)
+            }
+            if !pageConfirmed {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(detectingPage ? "ページ番号を確認中です。手入力もできます" : "ページ番号を確認してください")
+                        .font(.caption).foregroundStyle(BooksStyle.subInk)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { pageConfirmationButtons }
+                        VStack(alignment: .leading, spacing: 8) { pageConfirmationButtons }
+                    }
+                }
             }
         }
         .padding(.horizontal, 16).padding(.top, 12)
+    }
+
+    @ViewBuilder private var pageConfirmationButtons: some View {
+        ForEach(pageCandidates, id: \.self) { number in
+            Button("p.\(number)") { confirmPageText(String(number)) }
+                .font(.caption.weight(.semibold))
+        }
+        if let number = pageNumber, number > 0, !pageCandidates.contains(number) {
+            Button("前回の p.\(number) で続ける") { confirmPageText(String(number)) }
+                .font(.caption.weight(.semibold))
+        }
     }
 
     private var zoomControls: some View {
@@ -572,8 +607,8 @@ struct PhotoReaderView: View {
                         let rect = normalizedRect(start: dragStart ?? value.startLocation,
                                                   end: value.location, w: w, h: h, scale: scale, offset: offset)
                         guard rect.width * w * scale > 12, rect.height * h * scale > 8 else { return }
-                        guard let pn = pageNumber, pn > 0 else {
-                            message = "ページ番号を入力してください"; return
+                        guard let pn = pageNumber, pn > 0, pageConfirmed else {
+                            message = "ページ番号を確認してから範囲を選択してください"; return
                         }
                         message = nil
                         draftPage = pn
@@ -621,17 +656,19 @@ struct PhotoReaderView: View {
                                         let finalScreenY = (rect.minY - 0.5) * h * scale + h / 2 + offset.height + drag.translation.height
                                         let normX = (finalScreenX - w / 2 - offset.width) / (w * scale) + 0.5
                                         let normY = (finalScreenY - h / 2 - offset.height) / (h * scale) + 0.5
-                                        let newRect = CGRect(
+                                        guard let newRect = PinRestoration.normalized(CGRect(
                                             x: normX - rect.width,
                                             y: normY,
                                             width: rect.width,
-                                            height: rect.height)
+                                            height: rect.height)) else { return }
+                                        guard savePinPosition(newRect, for: sticky) else {
+                                            draggingPin = nil; pinDragOffset = .zero; return
+                                        }
                                         undoPinID = sticky.id
                                         undoPinRect = rect
                                         undoPinPosition = CGPoint(x: finalScreenX, y: finalScreenY)
                                         localPins[sticky.id] = newRect
                                         cachedPins[sticky.id] = newRect
-                                        sticky.savedPinRect = newRect
                                         Task {
                                             try? await Task.sleep(nanoseconds: 4_000_000_000)
                                             await MainActor.run {
@@ -656,11 +693,10 @@ struct PhotoReaderView: View {
                 // ピン移動後の「元に戻す」吹き出し
                 if let undoID = undoPinID, let oldRect = undoPinRect {
                     Button {
+                        guard let sticky = activeStickies.first(where: { $0.id == undoID }),
+                              savePinPosition(oldRect, for: sticky) else { return }
                         localPins[undoID] = oldRect
                         cachedPins[undoID] = oldRect
-                        if let sticky = activeStickies.first(where: { $0.id == undoID }) {
-                            sticky.savedPinRect = oldRect
-                        }
                         withAnimation { undoPinID = nil }
                     } label: {
                         Label("元に戻す", systemImage: "arrow.uturn.backward")
@@ -726,14 +762,18 @@ struct PhotoReaderView: View {
     }
 
     private func confirmSelection() {
-        guard !busy, let rect = selectedRect,
+        guard !busy, let rect = selectedRect, pageConfirmed,
               let page = draftPage, pageNumber == page else { return }
         let markerText = draft?.marker ?? "(図)"
+        let pending = book.stickies
+            .filter { !$0.placed && !$0.mastered && $0.deletedAt == nil && $0.pageNumber == page }
+            .min(by: { $0.createdAt < $1.createdAt })
+        let previous = pending.map {
+            (marker: $0.marker, before: $0.clipBefore, after: $0.clipAfter, heading: $0.heading,
+             reviewEnabled: $0.reviewEnabled, reviewStyle: $0.reviewStyle)
+        }
         let sticky: Sticky
-        // A5：このページに位置未定のメモがあれば、それを配置する（新規作成しない）。
-        if let pending = book.stickies
-            .filter({ !$0.placed && !$0.mastered && $0.pageNumber == page })
-            .min(by: { $0.createdAt < $1.createdAt }) {
+        if let pending {
             pending.placed = true
             pending.marker = markerText
             pending.clipBefore = draft?.before ?? []
@@ -751,12 +791,21 @@ struct PhotoReaderView: View {
         let markerTrimmed = markerText.trimmingCharacters(in: .whitespacesAndNewlines)
         let isQuestion = markerTrimmed.hasSuffix("?") || markerTrimmed.hasSuffix("？")
         sticky.reviewEnabled = isQuestion
-        if isQuestion {
-            sticky.reviewStyle = "qa"
-            NotificationScheduler.scheduleInitial(for: sticky)
+        if isQuestion { sticky.reviewStyle = "qa" }
+        guard savePinPosition(rect, for: sticky) else {
+            if let previous {
+                sticky.placed = false
+                sticky.marker = previous.marker
+                sticky.clipBefore = previous.before
+                sticky.clipAfter = previous.after
+                sticky.heading = previous.heading
+                sticky.reviewEnabled = previous.reviewEnabled
+                sticky.reviewStyle = previous.reviewStyle
+            } else { context.delete(sticky) }
+            return
         }
+        if isQuestion { NotificationScheduler.scheduleInitial(for: sticky) }
         localPins[sticky.id] = rect
-        sticky.savedPinRect = rect
         AppStore.setLastPage(page, for: book.id)
         AIHelper.improveHeading(for: sticky)
         cancelSelection()
@@ -776,18 +825,40 @@ struct PhotoReaderView: View {
         withAnimation(.easeInOut(duration: 0.2)) { selectedRect = nil }
     }
 
+    private func savePinPosition(_ rect: CGRect, for sticky: Sticky) -> Bool {
+        let old = sticky.savedPinRect
+        sticky.savedPinRect = rect
+        do { try context.save(); return true }
+        catch {
+            sticky.savedPinRect = old
+            message = "ピン位置を保存できませんでした。もう一度お試しください"
+            return false
+        }
+    }
+
     private func updateCachedPins() {
         matchingTask?.cancel()
+        matchingTask = nil
         matchingID = nil
-        guard wholeLoaded else { cachedPins = [:]; restoring = false; return }
+        restoring = false
+        // OCR未完了・失敗時でも、保存済み座標はすぐ表示する。
+        var saved: [UUID: CGRect] = [:]
+        for sticky in activeStickies {
+            if let rect = PinRestoration.restore(saved: localPins[sticky.id] ?? sticky.savedPinRect, matched: nil) {
+                saved[sticky.id] = rect
+            }
+        }
+        cachedPins = saved
+        guard wholeLoaded else { return }
         let texts = wholeLines.map { $0.text }
         let rects = wholeLines.map { $0.rect }
-        let markers = activeStickies.filter { localPins[$0.id] == nil }.map { ($0.id, $0.marker) }
+        let markers = activeStickies.filter { saved[$0.id] == nil }.map { ($0.id, $0.marker) }
+        guard !markers.isEmpty else { return }
         let id = UUID()
         matchingID = id
         restoring = true
         matchingTask = Task { @MainActor in
-            // Phase 1: テキスト照合（バックグラウンド）
+            // 旧データで位置が未保存の付箋だけ、文字列から復元する。
             let worker = Task.detached(priority: .userInitiated) { () -> [UUID: CGRect] in
                 var pins: [UUID: CGRect] = [:]
                 for (stickyID, marker) in markers {
@@ -798,64 +869,64 @@ struct PhotoReaderView: View {
                 }
                 return pins
             }
-            var pins = await withTaskCancellationHandler(operation: { await worker.value },
+            let pins = await withTaskCancellationHandler(operation: { await worker.value },
                                                          onCancel: { worker.cancel() })
             guard !Task.isCancelled, matchingID == id else { return }
-
-            // OCRマッチ失敗分は保存済みピン位置をフォールバックに使う
-            for (stickyID, _) in markers where pins[stickyID] == nil {
-                if let sticky = activeStickies.first(where: { $0.id == stickyID }),
-                   let saved = sticky.savedPinRect {
-                    pins[stickyID] = saved
-                }
+            for sticky in activeStickies {
+                // 照合中に手動移動したピンは、古い照合結果で上書きしない。
+                guard localPins[sticky.id] == nil, PinRestoration.normalized(sticky.savedPinRect) == nil,
+                      let rect = PinRestoration.normalized(pins[sticky.id]) else { continue }
+                cachedPins[sticky.id] = rect
+                _ = savePinPosition(rect, for: sticky)
             }
-
-            // OCRで見つかった新しい位置を保存
-            for (stickyID, rect) in pins {
-                if let sticky = activeStickies.first(where: { $0.id == stickyID }) {
-                    sticky.savedPinRect = rect
-                }
-            }
-
-            cachedPins = pins
             restoring = false
             matchingTask = nil
         }
     }
 
-    // 写真の上下の余白だけを読み、ページ番号を自動で入力する。
-    // ページ全体は読まない（プライバシー・速度）。検出できなければ前回値のまま。
+    private func confirmPageText(_ text: String) {
+        pageDetectionTask?.cancel()
+        pageDetectionTask = nil
+        pageDetectionID = nil
+        detectingPage = false
+        pageCandidates = []
+        let normalized = text.precomposedStringWithCompatibilityMapping.filter { $0.isASCII && $0.isNumber }
+        pageText = normalized
+        let number = Int(normalized)
+        pageNumber = number.flatMap { $0 > 0 ? $0 : nil }
+        pageConfirmed = pageNumber != nil
+        if let pn = pageNumber { AppStore.setLastPage(pn, for: book.id) }
+        message = nil
+    }
+
     private func autoDetectPage() {
         guard !didAutoDetectPage else { return }
         didAutoDetectPage = true
-        let initial = pageText
-        Task {
-            // 下の余白（ノンブルが多い）→ 上の余白 の順に探す。
-            let strips = [CGRect(x: 0, y: 0.82, width: 1, height: 0.18),
-                          CGRect(x: 0, y: 0, width: 1, height: 0.18)]
-            for roi in strips {
-                if Task.isCancelled { return }
-                let result = await OCR.recognize(image, regionOfInterest: roi)
-                guard let pn = result.pageNumber else { continue }
-                await MainActor.run {
-                    // ユーザーが手入力/範囲選択を始めていなければ自動反映。
-                    guard pageText == initial, selectedRect == nil else { return }
-                    pageText = String(pn)
-                    pageNumber = pn
-                    AppStore.setLastPage(pn, for: book.id)
-                    let note = "ページ \(pn) を自動入力しました"
-                    message = note
-                    Task {
-                        try? await Task.sleep(nanoseconds: 1_800_000_000)
-                        await MainActor.run { if message == note { message = nil } }
-                    }
-                }
-                return
-            }
-            // ページ番号が見つからなかった場合
-            await MainActor.run {
-                guard pageText == initial, selectedRect == nil else { return }
-                message = "ページ番号を入力してください"
+        pageDetectionTask?.cancel()
+        let id = UUID()
+        pageDetectionID = id
+        detectingPage = true
+        pageCandidates = []
+        pageDetectionTask = Task { @MainActor in
+            let reading = await PageNumberReader.read(image)
+            guard !Task.isCancelled, pageDetectionID == id else { return }
+            pageDetectionTask = nil
+            pageDetectionID = nil
+            detectingPage = false
+            // 手入力はタスクをキャンセルする。範囲選択を始めた後も番号を動かさない。
+            guard selectedRect == nil else { return }
+            if let pn = reading.number {
+                pageText = String(pn)
+                pageNumber = pn
+                pageConfirmed = true
+                AppStore.setLastPage(pn, for: book.id)
+                message = "ページ \(pn) を読み取りました"
+            } else {
+                pageCandidates = reading.candidates
+                pageConfirmed = false
+                message = reading.candidates.isEmpty
+                    ? "番号を確実に読めませんでした。手入力、または前回のページを確認してください"
+                    : "ページ番号の候補を選ぶか、正しい番号を入力してください"
             }
         }
     }
@@ -877,7 +948,6 @@ struct PhotoReaderView: View {
         guard !wholeLoaded, !busy, selectedRect == nil else { return }
         busy = true
         let id = UUID()
-        let pageAtStart = pageNumber
         recognitionID = id
         recognitionTask = Task { @MainActor in
             let result = await OCR.recognize(image)
@@ -887,9 +957,6 @@ struct PhotoReaderView: View {
             wholeLines = result.lines
             wholeLoaded = !result.lines.isEmpty
             busy = false
-            if pageNumber == pageAtStart, let pn = result.pageNumber {
-                pageNumber = pn; pageText = String(pn)
-            }
             updateCachedPins()
             if result.lines.isEmpty { message = "文字が読み取れませんでした。もう一度お試しください" }
         }
