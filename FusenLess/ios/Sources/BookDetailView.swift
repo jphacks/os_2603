@@ -179,6 +179,22 @@ struct BookDetailView: View {
                     .buttonStyle(CaptureButton(ghost: UIImagePickerController.isSourceTypeAvailable(.camera)))
                 }
 
+                // ⚠️ デバッグ用 — コードフリーズ前に必ず削除すること ⚠️
+                #if targetEnvironment(simulator)
+                Menu {
+                    ForEach(Sample.pages, id: \.pageNumber) { page in
+                        Button("p.\(page.pageNumber)  \(page.lines.first ?? "")") {
+                            photo = Sample.render(page)
+                        }
+                    }
+                } label: {
+                    Label("サンプル画像を使う（デバッグ）", systemImage: "doc.text.image")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(CaptureButton(ghost: true))
+                #endif
+                // ⚠️ デバッグ用ここまで ⚠️
+
                 Text("囲んで拡大し、確認してから付箋を追加")
                     .font(.caption).foregroundStyle(BooksStyle.subInk)
 
@@ -874,6 +890,8 @@ struct StickyEditor: View {
                 Section("メモ") {
                     TextField("気づいたこと・覚えたいこと", text: $memoText, axis: .vertical)
                         .lineLimit(3...6)
+                    Text("末尾を ? にすると自動的に復習対象になります")
+                        .font(.caption2).foregroundStyle(.secondary)
                         .onChange(of: memoText) { _, v in
                             sticky.heading = Sticky.makeHeading(memo: v, marker: sticky.marker)
                             // メモ末尾が ? なら復習対象に自動設定
