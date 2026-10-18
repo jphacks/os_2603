@@ -8,7 +8,7 @@ import Photos
 // OCRは端末内の Apple Vision（日本語）を使う。
 
 @main
-struct BookMarkApp: App {
+struct FusenLessApp: App {
     let container: ModelContainer
     let vault = VaultManager()
 

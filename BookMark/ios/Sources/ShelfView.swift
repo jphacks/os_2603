@@ -9,6 +9,8 @@ struct ShelfView: View {
     @State private var path: [Book] = []
     @State private var didAutoOpen = false
     @State private var query = ""
+    @State private var editMode = false
+    @State private var deleteTarget: Book?
 
     private let columns = [GridItem(.flexible(), spacing: 22, alignment: .top),
                            GridItem(.flexible(), spacing: 22, alignment: .top)]
@@ -36,10 +38,22 @@ struct ShelfView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 28) {
                     ForEach(books) { book in
-                        NavigationLink(value: book) {
+                        if editMode {
                             BookCard(book: book)
+                                .overlay(alignment: .topTrailing) {
+                                    Button { deleteTarget = book } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title2)
+                                            .foregroundStyle(.white, .red)
+                                    }
+                                    .offset(x: 6, y: -6)
+                                }
+                        } else {
+                            NavigationLink(value: book) {
+                                BookCard(book: book)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                     Button {
                         showAdd = true
@@ -69,16 +83,39 @@ struct ShelfView: View {
             .background(BooksStyle.background)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
                         prompt: "付箋を検索（見出し・目印・メモ）")
-            .navigationTitle("BookMark")
+            .navigationTitle("FusenLess")
             .navigationDestination(for: Book.self) { book in
                 BookDetailView(book: book)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        withAnimation { editMode.toggle() }
+                    } label: {
+                        Label(editMode ? "完了" : "削除", systemImage: editMode ? "checkmark" : "trash")
+                    }
+                    .disabled(books.isEmpty)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAdd = true } label: {
                         Label("本を追加", systemImage: "plus")
                     }
                 }
+            }
+            .alert("この本を削除しますか？", isPresented: Binding(
+                get: { deleteTarget != nil },
+                set: { if !$0 { deleteTarget = nil } }
+            )) {
+                Button("削除", role: .destructive) {
+                    if let book = deleteTarget {
+                        context.delete(book)
+                        deleteTarget = nil
+                        if books.count <= 1 { editMode = false }
+                    }
+                }
+                Button("キャンセル", role: .cancel) { deleteTarget = nil }
+            } message: {
+                Text(deleteTarget.map { "「\($0.title)」と全ての付箋が削除されます" } ?? "")
             }
             .sheet(isPresented: $showAdd) {
                 AddBookSheet()

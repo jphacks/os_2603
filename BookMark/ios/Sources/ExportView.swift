@@ -13,7 +13,7 @@ struct ExportButton: View {
         ShareLink(
             item: markdown,
             subject: Text(book.title),
-            message: Text("BookMark から書き出し"),
+            message: Text("FusenLess から書き出し"),
             preview: SharePreview(
                 "\(book.title) — 付箋 \(activeStickyCount)枚",
                 image: Image(systemName: "doc.plaintext")
