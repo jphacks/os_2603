@@ -35,6 +35,8 @@ struct QuickMemoSheet: View {
                 Section("メモ") {
                     TextField("覚えたいこと・気づいたこと", text: $memo, axis: .vertical)
                         .lineLimit(3...8)
+                    Text("末尾を ? にすると自動的に復習対象になります")
+                        .font(.caption2).foregroundStyle(.secondary)
                     if speech.isSupported {
                         Button {
                             speech.toggle(base: memo) { memo = $0 }
