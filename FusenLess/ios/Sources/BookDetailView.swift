@@ -22,6 +22,8 @@ struct BookDetailView: View {
     @State private var undoSticky: Sticky?
     @State private var showUndo = false
     @State private var showDeletedStickies = false
+    @State private var showStickySheet = false
+    @State private var pendingStickyTarget: String?
     @State private var completionScrollTarget: String?
     @State private var showCompletionError = false
 
@@ -68,6 +70,18 @@ struct BookDetailView: View {
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editing) { StickyEditor(sticky: $0) }
+        .sheet(isPresented: $showStickySheet, onDismiss: {
+            if let target = pendingStickyTarget {
+                completionScrollTarget = target
+                pendingStickyTarget = nil
+            }
+        }) {
+            StickyListSheet(book: book, placedByPage: placedByPage) { sticky in
+                pendingStickyTarget = "sticky-\(sticky.id)"
+                showStickySheet = false
+            }
+            .presentationDetents([.medium, .large])
+        }
         .sheet(isPresented: $showDeletedStickies) {
             DeletedStickyListView(stickies: deletedStickies)
         }
@@ -260,6 +274,10 @@ struct BookDetailView: View {
                 }
 
                 HStack(spacing: 10) {
+                    Button { showStickySheet = true } label: {
+                        Label("付箋一覧", systemImage: "list.bullet")
+                            .frame(maxWidth: .infinity)
+                    }
                     Button { showFlip = true } label: {
                         Label("パラパラ", systemImage: "book").frame(maxWidth: .infinity)
                     }
@@ -269,14 +287,6 @@ struct BookDetailView: View {
                 }
                 .buttonStyle(CaptureButton(ghost: true))
                 .disabled(placed.isEmpty)
-
-                // 本の小口ビュー（B2）：タブをタップでそのページへスクロール
-                if !placed.isEmpty {
-                    BookSpineView(book: book) { pn in
-                        withAnimation { proxy.scrollTo("page-\(pn)", anchor: .top) }
-                    }
-                    .padding(.top, 2)
-                }
 
                 // 教材を選んだ画面で、そのまま付箋を確認・編集・剥がせる。
                 HStack {
@@ -305,6 +315,7 @@ struct BookDetailView: View {
                                 StickyRow(sticky: sticky)
                                     .onTapGesture { editing = sticky }
                                     .peelable(tint: sticky.color.color) { markMastered(sticky) }
+                                    .id("sticky-\(sticky.id)")
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -315,10 +326,11 @@ struct BookDetailView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .task {
+        .task(id: completionScrollTarget) {
             guard let target = completionScrollTarget else { return }
             await Task.yield()
-            proxy.scrollTo(target, anchor: .top)
+            guard !Task.isCancelled else { return }
+            withAnimation { proxy.scrollTo(target, anchor: .top) }
             completionScrollTarget = nil
         }
         }
@@ -1185,54 +1197,47 @@ struct CaptureButton: ButtonStyle {
 // MARK: - 付箋一覧シート（ボトムシート）
 
 struct StickyListSheet: View {
+    let book: Book
     let placedByPage: [(page: Int, stickies: [Sticky])]
-    let deletedStickies: [Sticky]
-    var onEdit: (Sticky) -> Void
-    var onMastered: (Sticky) -> Void
+    var onSelect: (Sticky) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var showTrash = false
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 14) {
-                        ForEach(placedByPage, id: \.page) { group in
-                            VStack(spacing: 10) {
-                                HStack {
-                                    Text("p.\(group.page)")
-                                        .font(.caption.weight(.semibold)).foregroundStyle(BooksStyle.subInk)
-                                    Spacer()
-                                }
-                                ForEach(group.stickies) { s in
-                                    StickyRow(sticky: s)
-                                        .onTapGesture { onEdit(s) }
-                                        .peelable(tint: s.color.color) { onMastered(s) }
-                                }
-                            }
-                            .id("page-\(group.page)")
+            ScrollView {
+                VStack(spacing: 16) {
+                    BookSpineView(book: book) { page in
+                        if let sticky = placedByPage.first(where: { $0.page == page })?.stickies.first {
+                            onSelect(sticky)
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
+                    Text("位置や付箋をタップすると、教材画面の該当する付箋へ移動します")
+                        .font(.caption).foregroundStyle(BooksStyle.subInk)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(placedByPage, id: \.page) { group in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("p.\(group.page)")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(BooksStyle.subInk)
+                            ForEach(group.stickies) { sticky in
+                                Button { onSelect(sticky) } label: {
+                                    StickyRow(sticky: sticky)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("シートを閉じて、この付箋へ移動します")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+                .padding(20)
             }
+            .background(BooksStyle.background)
             .navigationTitle("付箋一覧")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showTrash = true
-                    } label: {
-                        Text("ゴミ箱")
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("閉じる") { dismiss() }
                 }
-            }
-            .sheet(isPresented: $showTrash) {
-                DeletedStickyListView(stickies: deletedStickies)
             }
         }
     }
