@@ -880,6 +880,7 @@ struct StickyEditor: View {
     @State private var encryptTask: Task<Void, Never>?
     @State private var summarizing = false
     @State private var summaryMessage: String?
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -988,11 +989,6 @@ struct StickyEditor: View {
                         }
                     ))
                 }
-                Section {
-                    Button("削除", role: .destructive) {
-                        context.delete(sticky); dismiss()
-                    }
-                }
             }
             .onAppear {
                 if let data = sticky.encryptedMemo {
@@ -1008,9 +1004,18 @@ struct StickyEditor: View {
             .navigationTitle("付箋")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("削除", role: .destructive) { showDeleteConfirm = true }
+                        .tint(.red)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完了") { dismiss() }
                 }
+            }
+            .confirmationDialog("この付箋を削除しますか？", isPresented: $showDeleteConfirm,
+                                titleVisibility: .visible) {
+                Button("削除する", role: .destructive) { context.delete(sticky); dismiss() }
+                Button("キャンセル", role: .cancel) {}
             }
         }
     }
