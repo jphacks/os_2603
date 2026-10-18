@@ -10,6 +10,8 @@ struct FlipView: View {
     var onClose: () -> Void
 
     @State private var index = 0
+    @State private var pageDrag: CGFloat = 0          // めくり途中の横のずれ
+    @State private var dragAxis: Axis?                // ドラッグの向き（最初の動きで決める）
     @State private var undoTarget: Sticky?
     @State private var showUndo = false
 
@@ -35,20 +37,79 @@ struct FlipView: View {
                     }
                     Spacer()
                 } else {
-                    TabView(selection: $index) {
-                        ForEach(Array(stickies.enumerated()), id: \.element.id) { i, s in
-                            FlipCard(sticky: s, onMastered: { markMastered(s) }).tag(i)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .always))
-                    .indexViewStyle(.page(backgroundDisplayMode: .always))
-                    .overlay { swipeHints }
+                    pager
+                        .overlay { swipeHints }
+                        .overlay(alignment: .bottom) { pageDots }
                     .padding(.bottom, 8)
                 }
             }
             .overlay(alignment: .bottom) { undoToast }
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(pageSwipe)
         .animation(.spring(), value: showUndo)
+        // 覚えた付箋が抜けて枚数が減ったら、はみ出さないようにする
+        .onChange(of: stickies.count) { _, count in
+            if index > max(count - 1, 0) { index = max(count - 1, 0) }
+        }
+    }
+
+    // MARK: - めくり（画面のどこを横にスワイプしてもめくれる）
+
+    private var pager: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            HStack(spacing: 0) {
+                ForEach(Array(stickies.enumerated()), id: \.element.id) { _, s in
+                    FlipCard(sticky: s, onMastered: { markMastered(s) })
+                        .frame(width: w)
+                }
+            }
+            .offset(x: -CGFloat(index) * w + pageDrag)
+        }
+        .clipped()
+    }
+
+    private var pageSwipe: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { v in
+                if dragAxis == nil {
+                    dragAxis = abs(v.translation.width) > abs(v.translation.height) ? .horizontal : .vertical
+                }
+                guard dragAxis == .horizontal else { return }
+                var dx = v.translation.width
+                // 最初/最後のページでは引っぱりを弱く（ゴムのように）
+                if (index == 0 && dx > 0) || (index == stickies.count - 1 && dx < 0) { dx /= 3 }
+                pageDrag = dx
+            }
+            .onEnded { v in
+                defer { dragAxis = nil }
+                guard dragAxis == .horizontal else { return }
+                // 少しの距離か、速いはらいでめくる
+                let dx = v.translation.width
+                let flick = v.predictedEndTranslation.width
+                var next = index
+                if (dx < -40 || flick < -120), index < stickies.count - 1 { next += 1 }
+                if (dx > 40 || flick > 120), index > 0 { next -= 1 }
+                withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.86)) {
+                    index = next
+                    pageDrag = 0
+                }
+            }
+    }
+
+    private var pageDots: some View {
+        HStack(spacing: 8) {
+            ForEach(stickies.indices, id: \.self) { i in
+                Circle()
+                    .fill(i == index ? BooksStyle.subInk : BooksStyle.subInk.opacity(0.3))
+                    .frame(width: 7, height: 7)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(BooksStyle.card, in: Capsule())
+        .opacity(stickies.count > 1 ? 1 : 0)
+        .allowsHitTesting(false)
     }
 
     /// めくれる方向だけに出す薄い矢印。タップでもその方向へめくれる。
@@ -172,12 +233,14 @@ private struct FlipCard: View {
         .gesture(
             DragGesture(minimumDistance: 15)
                 .onChanged { v in
-                    guard !isDismissing, v.translation.height < 0 else { return }
-                    dragOffset = v.translation
+                    guard !isDismissing, v.translation.height < 0,
+                          abs(v.translation.height) > abs(v.translation.width) else { return }
+                    dragOffset = CGSize(width: 0, height: v.translation.height)
                 }
                 .onEnded { v in
                     guard !isDismissing else { return }
-                    if v.translation.height < -80 {
+                    if v.translation.height < -80,
+                       abs(v.translation.height) > abs(v.translation.width) {
                         peel()
                     } else {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
