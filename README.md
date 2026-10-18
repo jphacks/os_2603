@@ -86,6 +86,31 @@
 * **付箋の配置はAIではなくアルゴリズム**：再撮影時の位置合わせは文字列のあいまい一致で確実・高速に行い、AIは付箋の見出しと要約に限定した
 * **復習をアプリで完結させない**：アプリで答えを見て終わるのではなく、思い出せない付箋は紙の教科書に戻して読み直す設計にした。デジタルは「どこを読み直すか」を示す役に徹する
 
+## 起動方法
+
+### 必要なもの
+- **Xcode 16** 以降（Swift 5 / iOS 18 SDK）
+- **XcodeGen**（`brew install xcodegen`）
+- iPhone 実機 または iOS Simulator
+
+### 手順
+```bash
+# 1. リポジトリをクローン
+git clone https://github.com/jphacks/os_2603.git
+cd os_2603/FusenLess/ios
+
+# 2. Xcodeプロジェクトを生成
+xcodegen generate
+
+# 3. Xcodeで開く
+open FusenLess.xcodeproj
+```
+
+4. Xcode で **Signing & Capabilities** → **Team** を自分の Apple ID に変更
+5. 実機またはシミュレータを選んで **Run（Cmd+R）**
+
+> **補足**: 端末内AI（付箋の見出し・要約の自動生成）は iOS 26 以降の Apple Intelligence 対応端末でのみ利用できます。非対応端末でも他の機能はすべて動作します。
+
 ## 開発技術
 ### 活用した技術
 #### API・データ
