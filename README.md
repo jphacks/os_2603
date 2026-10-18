@@ -1,7 +1,6 @@
 # FusenLess（本の付箋アプリ）
 
-<!-- TODO: サムネイル画像とデモ動画のリンクに差し替え -->
-![FusenLess デモ動画](https://youtube.com/shorts/XNKYjWmO3zk?si=MnbfIdFY68XfvLmP)
+[![FusenLess デモ動画](https://img.youtube.com/vi/XNKYjWmO3zk/0.jpg)](https://youtube.com/shorts/XNKYjWmO3zk?si=MnbfIdFY68XfvLmP)
 
 > **本はきれいなまま、学んだことは自分に残る。**
 > 図書館で借りた本にも、売りたい教科書にも、一切汚さずに付箋とメモを残せるiPhoneアプリです。
